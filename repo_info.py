@@ -19,3 +19,9 @@
      # 4) Select 'Stage All' in top right to prime changes to repo for commit.
      # 5) Select 'Commit to <REPO NAME>'
      # 6) First time round if brand new repo select 'Publish' otherwise select 'Push'.
+
+# Useful Links:
+
+# https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup
+# https://github.com/atom/github/issues/932
+# https://github.com/JPNEURO
