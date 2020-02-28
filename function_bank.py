@@ -8,134 +8,7 @@ import matplotlib.pyplot as plt
 # Shortcuts
 'Ctrl + Alt + Shift + [ = Collapse all functions'
 
-
-def t_check(starts, times, num_trials, num_seq, num_emoji):
-    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
-
-    starts = np.reshape(starts, (num_trials, num_seq, num_emoji))
-    print(starts - times[0])
-
-    return starts
-
-
-def mark_stamps(markers_file, num_trials, num_seq, num_emoji):
-    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
-
-    starts = np.reshape(np.load(markers_file)['arr_1'], (num_trials, num_seq, num_emoji), order='C')
-    ends = np.reshape(np.load(markers_file)['arr_3'], (num_trials, num_seq, num_emoji), order='C')
-
-    return starts, ends
-
-
-def mark_arrang(markers_file, num_trials, num_seq, num_emoji):
-    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
-
-    mark = np.load(markers_file)['arr_0']
-    mark = ','.join(mark)
-
-    new = []
-    for i in range(len(mark)):
-        new = np.append(new, np.fromstring(mark[i], dtype=int, sep=','))
-
-    new = np.reshape(new.astype(int), (num_trials, num_seq, num_emoji))
-    return mark
-
-
-def plot_pro(fig_num, title, data, x_axis, leg, show, verbose):
-    '''
-    Simple quick plotting function for cleaner code in main functions.
-
-    Assumes Samples x Channels / Events / Sequences / Trials.
-
-    Inputs:
-
-    fig_num     = figure number.
-    title       = figure title.
-    data        = time-series data (e.g. mV amplitudes/ impedance ohms).
-    x_axis      = temporal data of EEG times-series.
-    leg         = plot legend (e.g. channel indices ['Fz', 'Cz', 'A2'])
-    show        = call plt.show() to publish figures.
-    verbose     = print function info.
-
-    Example:
-
-    plot_pro(1, 'Raw Zeroed Data', eeg, None, leg=chan_ind, show=None, verbose=1)
-
-    '''
-    # Get data dims.
-    a, b = np.shape(data)
-    # Assign figure number.
-    plt.figure(fig_num)
-    # Assign figure title.
-    plt.title(title)
-    # If no x_axis generate one based on len of samples.
-    if x_axis is None:
-        x_axis = np.arange(a)
-    '---Plot Data'
-    plt.plot(x_axis, data)
-    # If legend specified, assign.
-    if leg is not None:
-        plt.legend(leg, loc='upper right', fontsize='xx-small')
-    plt.tight_layout()
-    # Print data info.
-    if verbose == 1:
-        print('EEG DIMS: ', data.shape)
-    if show == 1:
-        plt.show()
-
-
-def filtering(eeg, samp_ratekHz, zero, hlevel, llevel, notc, notfq):
-    '''
-    Applies filtering to EEG time-series data.
-
-    Assumes Samples x Channels.
-
-    Inputs:
-
-    eeg             = data matrix.
-    samp_ratekHz    = data acquisition sampling rate in kHz e.g. 0.5 == 500Hz.
-    zero            = if 'ON' data will be zeroed by subtracting the mean of the channel array.
-    hlevel          = high-pass filter limit, if set at None no high-pass filtering is applied.
-    llevel          = low-pass filter limit, if set at None no low-pass filtering is applied.
-    notc            = notc filter options for removing 50Hz noise, either 'NIK', 'NOC' or 'LOW'
-                      see each respective function for more details.
-    notfq           = frequency at which to apply notch filter, UK powerline is 50Hz.
-
-
-    Outputs:
-
-    data            = filtered data.
-
-    Example: data = pb.filtering(data, samp_ratekHz=0.5, zero='ON', hlevel=0.1, llevel=30, notc='NIK', notfq=50)
-
-    '''
-    #
-    '---------------------------------------------------'
-    'ZERO: mornalize data with zero meaning.'
-    if zero == 'ON':
-        eeg = zero_mean(np.copy(eeg))
-    '---------------------------------------------------'
-    'FILTERING: highpass filter.'
-    if hlevel is not None:
-        eeg = butter_highpass_filter(np.copy(eeg), hlevel, 500, order=5)
-    '---------------------------------------------------'
-    'FILTERING: lowpass filter.'
-    if llevel is not None:
-        # Fix by adding singleton dimension.
-        if len(np.shape(eeg)) == 1:
-            eeg = np.expand_dims(np.copy(eeg), axis=1)
-        eeg = butter_lowpass_filter(np.copy(eeg), llevel, 500, order=5)
-    '----------------------------------------------------'
-    'FILTERING: 50Hz notch filter.'
-    if notc == 'NIK':
-        samp_rateHz = samp_ratekHz * 1000
-        eeg = notchyNik(eeg, Fs=samp_rateHz, freq=notfq)
-    elif notc == 'NOC':
-        eeg = notchy(eeg, 500, notfq)
-    elif notc == 'LOW':
-        eeg = butter_lowpass_filter(eeg, notfq, 500, order=5)
-    return eeg
-
+'--Range Removal--'
 
 def range_remov(data, n_chans, chan_ind, limit, verbose):
     '''
@@ -191,100 +64,7 @@ def range_remov(data, n_chans, chan_ind, limit, verbose):
     return data, chan_list
 
 
-def referencing(data, chan_ind, type, limit, verbose):
-    '''
-    Referencing in either A2 subtraction or average referencing with range removal.
-
-    Inputs:
-
-    data        = eeg time-series.
-    chan_ind    = string list of channel names included e.g. ['Fz', 'Cz', 'A2']
-    type        = 'A2' or 'AVG'.
-    limit       = 'AVG' referencing makes use of the range_removal function, this acts like a band boolean.
-                  If set at 40, any channel containing values greater than 40 or lower than -40
-                  will be marked and excluded.
-    verboe      = print function info.
-
-    Outputs:
-
-    data      = 'AVG' refereced data
-
-    NOTE: Assumes data in Samples x Channels.
-    NOTE: Assumes A2 channel is in data matrix.
-    NOTE: channel used for referencing in A2 style must be position as last channel (-1) in matrix.
-
-    Example: data = pb.referencing(data, type='AVG', limit=20)
-
-    '''
-
-    # Data Dimensions.
-    samp, n_chans = np.shape(data)
-    # Isolate Reference Channel
-    ref_chan = data[:, -1]
-    # Remove Reference Channel from data matrix.
-    data = data[:, 0:-1]
-
-    if type == 'A2':
-        for i in range(n_chans - 1):
-            data[:, i] = data[:, i] - ref_chan
-        if verbose == 1:
-            # Data Dimesions Check:
-            print('Post A2 REF EEG DIMS: ', data.shape)
-        return data
-
-    if type == 'AVG':
-        # Use range_removal function to remove channels with excessive range_values.
-        data, chan_list = range_remov(data, n_chans=n_chans - 1,
-                                      chan_ind=chan_ind, limit=limit, verbose=1)
-        # Generate average reference from eeg montage.
-        ref_avg = np.average(data, axis=1)
-        # Subtract average reference from each eeg channel.
-        for i in range(n_chans - 1):
-            data[:, i] = data[:, i] - ref_avg
-        if verbose == 1:
-            # Data Dimesions Check:
-            print('Post AVG REF EEG DIMS: ', data.shape)
-        return data
-
-
-def reducer(data, type, ref, chan_list, verbose):
-    '''
-    Signal Reduction to Samples x Emoji / Event matrix.
-    Reduce array down to just one signal either by isolating Cz or averaging across all OR a number of channels.
-
-    Assumes Samples x Channels x Emoji.
-
-    Inputs:
-
-    data        = eeg time-series.
-    type        = either 'AVG' meaning an average signal is generated based off of the channel indices in chan_list,
-                  or 'IND', meaning a single channel e.g. Cz  is simply taken from the list and added to a separate
-                  output matrix.
-    ref         = matrix channel index for electrode you want to individually ('IND') isolate, if None, then skip.
-    chan_list   = list of channel indices for cross-channel averaging.
-    verbose     = print function info.
-
-    Outputs:
-
-    data        = single channels of emoji level data (Samples x Channels x Emoji Events).
-                  Channel dimension is just a singleton dimensions to retain features of following steps.
-
-    IND Example: i_data = reducer(r_data, type='IND', ref=[1], chan_list=None, verbose=1)
-    AVG Example: i_data = reducer(r_data, type='AVG', ref=None, chan_list=[0, 1], verbose=1)
-
-
-    '''
-
-    if type == 'IND':
-        data = data[:, ref, :]
-    elif type == 'AVG':
-        data = np.average(data[:, chan_list, :], axis=1)
-        data = np.expand_dims(data, axis=1)
-    if verbose == 1:
-        print('Post-Reduction DATA DIMS: ', data.shape)
-
-    return data
-
+'--Compound--'
 
 def pipeline(num_chan, num_emoji, num_seq, starts, ends, cue, order, eeg, eeg_time, seq_c, chan_ind, detrend, out_size, main_rs, plots, verbose=1):
     '''
@@ -403,6 +183,60 @@ def pipeline(num_chan, num_emoji, num_seq, starts, ends, cue, order, eeg, eeg_ti
     '''
 
 
+def prepro(eeg, samp_ratekHz, zero, ext, elec, filtH, hlevel, filtL, llevel, notc, notfq, ref_ind, ref, avg):
+    # Assumes Samples x Trials.
+    'ZERO: mornalize data with zero meaning.'
+    if zero == 'ON':
+        eeg = zero_mean(np.copy(eeg))
+    '---------------------------------------------------'
+    'EXTRACT: relevant electrodes:  0) Fz, 1) Cz, 2) Pz, 3) P4, 4) P3, 5) O1, 6) O2, 7) A2.'
+    'Reference: Guger (2012): Dry vs Wet Electrodes | https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3345570/'
+    # Ensure reference electrode A2 is extracted by calculating the position in the array.
+    # A2 ref_ind always -7, as there are 6 variables at end: ACC8, ACC9, ACC10, Packet, Trigger & Time-Stamps.
+    if ext == 'INC-Ref':
+        all_eeg = eeg[:, [0, 1, 2, 3, 4, 5, 6]]
+        grab = np.append(elec, ref_ind)
+        eeg = np.squeeze(eeg[:, [grab]])
+    if ext == 'NO-Ref':
+        all_eeg = eeg[:, [0, 1, 2, 3, 4, 5, 6]]
+        eeg = np.squeeze(eeg[:, [elec]])
+    '------------------------------------------------------'
+    'REFERENCING: using REF electrode.'
+    if ref == 'A2':
+        eeg = referencer(np.copy(eeg), -1)
+    elif ref == 'AVG':
+        eeg = avg_referencer(np.copy(eeg), all_eeg)
+    '---------------------------------------------------'
+    'FILTERING: highpass filter.'
+    if filtH == 'ON':
+        eeg = butter_highpass_filter(np.copy(eeg), hlevel, 500, order=5)
+    '---------------------------------------------------'
+    'FILTERING: lowpass filter.'
+    if filtL == 'ON':
+        # Fix by adding singleton dimension.
+        if len(np.shape(eeg)) == 1:
+            eeg = np.expand_dims(np.copy(eeg), axis=1)
+        eeg = butter_lowpass_filter(np.copy(eeg), llevel, 500, order=5)
+    '----------------------------------------------------'
+    'FILTERING: 50Hz notch filter.'
+    if notc == 'NIK':
+        samp_rateHz = samp_ratekHz * 1000
+        eeg = notchyNik(np.copy(eeg), Fs=samp_rateHz, freq=notfq)
+    elif notc == 'NOC':
+        eeg = notchy(eeg, 500, notfq)
+    elif notc == 'LOW':
+        eeg = butter_lowpass_filter(np.copy(eeg), notfq, 500, order=5)
+    '---------------------------------------------------'
+    'AVERAGING: cross-channels.'
+    if avg is True:
+        eeg = np.average(np.copy(eeg), axis=1)
+        eeg = np.expand_dims(eeg, axis=1)
+    '---------------------------------------------------'
+    return eeg
+
+
+'--Averaging--'
+
 def sig_avg(data, out_size, num_emoji, num_seq, order, scaler, plots, verbose):
     '''
     Averages signals for each emoji location across sequences for randomised event timings based off event marker timestamps.
@@ -455,59 +289,46 @@ def sig_avg(data, out_size, num_emoji, num_seq, order, scaler, plots, verbose):
     return a_data
 
 
-def model_app(data, type, cue, model):
+def reducer(data, type, ref, chan_list, verbose):
     '''
-    type        = either offline ('OFFLINE') just returning data for later classifier calibration
-                  or online ('ONLINE') using a pre-calibrated model for prediction & returning data.
-    mod_file    = location of the lda model used for real-time predicition.
-    '''
-    if type == 'OFFLINE':
-        print('REQUIRES DEV.')
-    elif type == 'ONLINE':
-        '====REAL_TIME PREDICTION===='
-        # Real-Time Prediction @ emoji event level.
-        predictions = model.predict(data)
-        pred_proba = model.predict_proba(data)
-        print('------------------------------')
-        print('------------RESULT------------')
-        print('Targ Cue: ', cue)
-        print('Predictions:   ', predictions.shape, predictions)
-        # p3_pick.
-        print('Predict Probabilities: \n', np.round(pred_proba, decimals=2))
-        if cue == np.argmax(pred_proba[:, 1]):
-            binary_val = 1
-            print('CORRECT RETURN | TARGET CUE: ', cue, '| NON-BINARY ANSWER: ', np.argmax(
-                pred_proba[:, 1]), '| BINARY: ', binary_val, '| PROBABILITY: ', np.amax(pred_proba[:, 1]))
-            # result = Binary Prediction / targ_cue = Cued Emoji / pred_em = prediction from emoji locations / proba = Probability.
-            return binary_val, np.argmax(pred_proba[:, 1]), np.amax(pred_proba[:, 1])
-        else:
-            binary_val = 0
-            print('INCORRECT RETURN | TARGET CUE: ', cue, '| NON-BINARY ANSWER: ', np.argmax(
-                pred_proba[:, 1]), '| BINARY ANSWER: ', binary_val, '| PROBABILITY: ', np.amax(pred_proba[:, 1]))
-            # result = Binary Prediction / targ_cue = Cued Emoji / pred_em = prediction from emoji locations / proba = Probability.
-            return binary_val, np.argmax(pred_proba[:, 1]), np.amax(pred_proba[:, 1])
+    Signal Reduction to Samples x Emoji / Event matrix.
+    Reduce array down to just one signal either by isolating Cz or averaging across all OR a number of channels.
 
+    Assumes Samples x Channels x Emoji.
 
-def stat_check(data, chan_ind, verbose):
-    '''
-    Prints Basic Stats.
+    Inputs:
 
-    Assumes Samples x Channels.
+    data        = eeg time-series.
+    type        = either 'AVG' meaning an average signal is generated based off of the channel indices in chan_list,
+                  or 'IND', meaning a single channel e.g. Cz  is simply taken from the list and added to a separate
+                  output matrix.
+    ref         = matrix channel index for electrode you want to individually ('IND') isolate, if None, then skip.
+    chan_list   = list of channel indices for cross-channel averaging.
+    verbose     = print function info.
+
+    Outputs:
+
+    data        = single channels of emoji level data (Samples x Channels x Emoji Events).
+                  Channel dimension is just a singleton dimensions to retain features of following steps.
+
+    IND Example: i_data = reducer(r_data, type='IND', ref=[1], chan_list=None, verbose=1)
+    AVG Example: i_data = reducer(r_data, type='AVG', ref=None, chan_list=[0, 1], verbose=1)
+
 
     '''
 
-    for w in range(len(chan_ind)):
-        imean = np.mean(data[:, w])
-        imin = np.amin(data[:, w])
-        imax = np.amax(data[:, w])
-        irange = imax - imin
-        # Info
-        print('---Channel-Wise Stats: ', chan_ind[w])
-        print(chan_ind[w], ' Mean: ', imean)
-        print(chan_ind[w], ' Min: ', imin)
-        print(chan_ind[w], ' Max: ', imax)
-        print(chan_ind[w], ' Range: ', irange)
+    if type == 'IND':
+        data = data[:, ref, :]
+    elif type == 'AVG':
+        data = np.average(data[:, chan_list, :], axis=1)
+        data = np.expand_dims(data, axis=1)
+    if verbose == 1:
+        print('Post-Reduction DATA DIMS: ', data.shape)
 
+    return data
+
+
+'--Scaling--'
 
 def stand_scaler(X):
     '''
@@ -566,6 +387,8 @@ def min_max_scaler(X, fr):
 
     return X
 
+
+'--Detrending--'
 
 def lin_det(data, chan_ind, plot):
     '''
@@ -632,83 +455,7 @@ def pol_det(data, chan_ind, order, plot):
     return data
 
 
-def class_balance(X, y, balance, verbose):
-    '''
-
-    Generates a class balance of P3 and Non-P3 events based on Binary class labels.
-
-    1) grabs all indices of the P3 and NP3 events from the string labels array and stores separately.
-    2) shuffles the NP3 label indices array to ensure sampling across entire session.
-    3) cuts down NP3 label indices array to same size as that of the P3 labels indices array for
-        a clean 50/50 split to maintain class blance in analysis model fits and testing.
-    4) aggregates P3 and non-P3 data according to these indices into separate data arrays.
-    5) brings all P3 and non-P3 data and labels together for Striatified Shuffling or randomized
-        subsampling further down the analysis pipeline.
-
-    NOTE: Assumes Events x Samples.
-
-    Inputs:
-
-    data = aggregated segmented EEG data across session.
-    labels = MUST BE BINARY ground truth string labels indicating eeg event P3 / NP3.
-    balance = refers to a percentage difference in terms of P3 vs NP3 events in final aggregate array.
-                For example, a value of 1 means 1:1 ratio, a value of 2 means a 1:2 / P3:NP3 ratio.
-                This has a hard-limit as there are only so many P3s to NP3, recommend max of 5.
-    verbose = info on process 1 == print.
-
-    Outputs:
-
-    bal_data = aggregated class-balanced data matrix.
-    bal_labels = aggregated class-balanced string labels array.
-    bal_i_labels = aggregated class-balanced numeric labels array.
-
-    Example:
-
-    bal_i_labels, bal_data, bal_labels = pb.class_balance_50_50(X, y)
-
-    '''
-    import random
-    # Preform P3 and NP3 agregate arrays.
-    p3 = []
-    np3 = []
-    # Gather all indices of P3 (1) and NP3 (0) events in the labels array.
-    id_np3 = [i for i, x in enumerate(y) if x == 0]
-    id_p3 = [i for i, x in enumerate(y) if x == 1]
-    # Convert to subscriptable numpy array.
-    id_np3 = np.asarray(id_np3)
-    id_p3 = np.asarray(id_p3)
-    # Convert to numeric tye integer for indexing.
-    id_np3 = id_np3.astype(int)
-    id_p3 = id_p3.astype(int)
-    # Shuffle the Non-P300 event indices list.
-    random.shuffle(id_np3)
-    # Balance Value.
-    bal_val = np.int(len(id_p3) * balance)
-    # Reduce the number of NP3 indices to the amount examples secified vai the balance value.
-    id_np3 = id_np3[0:bal_val]
-    # Print function info.
-    if verbose == 1:
-        print('ID_P3 / NUMBER OF P3 EVENTS: ', len(id_p3))
-        print('ID_NP3 / NUMBER OF NP3 EVENTS PRE SHUFFLE: ', len(id_np3))
-        print(id_p3[0], len(id_p3), id_p3[0:10])
-        print(id_np3[0], len(id_np3), id_np3[0:10])
-        print('ID_NP3 / NUMBER OF NP3 EVENTS POST SHUFFLE: ', len(id_np3))
-    # Aggregate P3 signals together.
-    p3 = X[id_p3, :]
-    # Aggregate NP3 signals together to a ratio relative to the P3 class events.
-    np3 = X[id_np3, :]
-    # Aggregate P3 and NP3 events into single data matrix.
-    bal_data = np.append(p3, np3, axis=0)
-    # Index into P3 / NP3 label locations and append.
-    bal_labels = np.append(y[id_p3], y[id_np3])
-
-    if verbose == 1:
-        print('P3:NP3 ratio: {0} : {1} / {2} : {3}'.format(1, balance, len(id_p3), len(id_np3)))
-        print('Bal Data DIMS: ', bal_data.shape)
-        print('Bal Labels DIMS: ', bal_labels.shape)
-
-    return bal_data, bal_labels
-
+'--Downsampling--'
 
 def down_S(data, factor, samp_ratekHz, plotter, verbose):
     '''
@@ -826,71 +573,7 @@ def down_samp(data, factor, samp_ratekHz, plotter, verbose):
     return re_X, neo_samp_ratekHz
 
 
-def int_labels(y):
-    # Generate and output integer labels.
-    y2 = []
-    for p in range(len(y)):
-        if p == 0:
-            y2 = int(y[p])
-        else:
-            y2 = np.append(y2, int(y[p]))
-    return y2
-
-
-def data_parsing(data, labels, n_splits, train_size, test_size, random_state, multi_chan, verbose):
-    '''
-    Data splitting for test and train data and labels.
-
-    Can be done for single chan (post channel averaging / or isolated Cz signals),
-    or at the multi channel level (however not randomsied).
-
-    Assumes Trials x Samples.
-
-    Inputs:
-        data = eeg input array.
-        labels = ground truth.
-        splits = number of chunks for train / test evaluation, good for checking start vs end of seesion.
-        train_per = e.g. 0.85 would give 85% of the data to the train set.
-        rand_state = if randmisation engaged (is as default) in sss, then changes random seed.
-        multi_chan = 0 : signle chan, 1 : multi-chan splitting.
-        verbose = 1 : print out info.
-
-    Output:
-        X_train, y_train, X_test, y_test
-
-    Example:
-
-    X_train, y_train, X_test, y_test = pb.data_parsing(data, labels, splits, train_per,
-                                                       rand_state, multi_chan)
-    '''
-    from sklearn.model_selection import StratifiedShuffleSplit
-
-    # Generate split object with sss.
-    test_size = 1 - train_size
-    sss = StratifiedShuffleSplit(
-        n_splits=n_splits, train_size=train_size, test_size=test_size, random_state=random_state)
-    sss.get_n_splits(data, labels)
-    print('SSS Split: ', sss)
-
-    data = np.swapaxes(data, 0, 1)
-    print('data dims: ', data.shape, 'labels dims: ', labels.shape)
-
-    '----Multi-Chan Train/ Test Parsing------'
-    if multi_chan == 'OFF':
-        for train_index, test_index in sss.split(data, labels):
-            X_train, X_test = data[train_index], data[test_index]
-            y_train, y_test = labels[train_index], labels[test_index]
-    elif multi_chan == 'ON':
-        ind = np.int(len(labels)*train_per)
-        X_train = data[:, 0:ind]
-        X_test = data[:, ind:]
-        y_train = labels[0: ind]
-        y_test = labels[ind:]
-    if verbose == 1:
-        print('X train: ', X_train.shape, 'X_test: ', X_test.shape,
-              'y train: ', y_train.shape, 'y_test: ', y_test.shape)
-    return X_train, y_train, X_test, y_test
-
+'--Analysis--'
 
 def log_reg(data, labels, n_splits, train_size, random_state, multi_chan,
             solver, penalty, max_iter, cross_val_acc, covmat, verbose):
@@ -1060,6 +743,41 @@ def lda_(data, labels, split, div, num_comp, meth, covmat, model, plots, import_
         return predictions, pred_proba
 
 
+def model_app(data, type, cue, model):
+    '''
+    type        = either offline ('OFFLINE') just returning data for later classifier calibration
+                  or online ('ONLINE') using a pre-calibrated model for prediction & returning data.
+    mod_file    = location of the lda model used for real-time predicition.
+    '''
+    if type == 'OFFLINE':
+        print('REQUIRES DEV.')
+    elif type == 'ONLINE':
+        '====REAL_TIME PREDICTION===='
+        # Real-Time Prediction @ emoji event level.
+        predictions = model.predict(data)
+        pred_proba = model.predict_proba(data)
+        print('------------------------------')
+        print('------------RESULT------------')
+        print('Targ Cue: ', cue)
+        print('Predictions:   ', predictions.shape, predictions)
+        # p3_pick.
+        print('Predict Probabilities: \n', np.round(pred_proba, decimals=2))
+        if cue == np.argmax(pred_proba[:, 1]):
+            binary_val = 1
+            print('CORRECT RETURN | TARGET CUE: ', cue, '| NON-BINARY ANSWER: ', np.argmax(
+                pred_proba[:, 1]), '| BINARY: ', binary_val, '| PROBABILITY: ', np.amax(pred_proba[:, 1]))
+            # result = Binary Prediction / targ_cue = Cued Emoji / pred_em = prediction from emoji locations / proba = Probability.
+            return binary_val, np.argmax(pred_proba[:, 1]), np.amax(pred_proba[:, 1])
+        else:
+            binary_val = 0
+            print('INCORRECT RETURN | TARGET CUE: ', cue, '| NON-BINARY ANSWER: ', np.argmax(
+                pred_proba[:, 1]), '| BINARY ANSWER: ', binary_val, '| PROBABILITY: ', np.amax(pred_proba[:, 1]))
+            # result = Binary Prediction / targ_cue = Cued Emoji / pred_em = prediction from emoji locations / proba = Probability.
+            return binary_val, np.argmax(pred_proba[:, 1]), np.amax(pred_proba[:, 1])
+
+
+'--t-Stochastic Neighbour Embedding--'
+
 def tSNE_3D(data, labels, n_components, init, perplexity, learning_rate, multi, verbose):
     '''
     Application of 3D TSNE for visualization of high dimensional data, however setting n_components at 2
@@ -1195,264 +913,7 @@ def tSNE_2D(X, labels, n_components, perplexities, learning_rates):
     plt.show()
 
 
-def slice_ext(data_file, data_type, labels_file, markers_file, num_chan, num_emoji, num_seq, out_size, detrend, plotter, verbose):
-    '''
-    Method for extracting emoji level / event data chunks based on the on-set / offset
-    of marker stream pushed label timestamps. This means we extract data only during the
-    times at which the stimuli has begun and ended, yielding more rigourous time-corrective
-    data values. These emoji-level chunks are interpolated to ensure consistency in
-    the temporal separation of data time-points.
-
-    ASSUMES 8 Channels: Fz, Cz, Pz, P4, P3, O1, O2, A2. / [0:7] , important for seq_data parsing.
-
-    # Inputs:
-
-    data_file = the file location containing either the eeg / imp .npz's (Trial-Level).
-    data_type = either 'volt' or 'imp' for voltages or impedances data file extraction and slicing.
-    labels_file = the file location containing the labels files e.g. 0001_trial_labels.npz (Trial-Level).
-    marker_file = the file location containing the marker file (all pushed markers and timestamps) (Session-Level).
-    num_chan = number of channels for extraction.
-    num_emoji = number of emojis in the stimulus array.
-    num_seq = number of sequences in each trial.
-    out_size = size of the channel level signal chunk to want returned from the interpolation function.
-    detrend = application of polynomial detrending of order 10 (1 == Yes).
-    plotter = plot showing the extraction and resampling of one emoji event across all channels using zeroed
-              data. The data is not zeroed, only the timestamps, data zeroing is done by prepro function,
-              see note below. 1 == plot, 0 == no plot.
-    verbose = details of the function operating, 1 == print progress, 0 == do not print.
-
-    # Outputs:
-
-    starts = marker timestamps for all pushed emoji labels occuring at the START of the event (pre-augmenttion).
-    ends = marker timestamps for all pushed emoji labels occuring at the END of the event (post-augmentation).
-    seq_chk = Extracted data array using marker start and end pushed timestamps, yet to be re-sampled.
-    r_data = Aggregate arrays of the extracted and resampled event data, dims = Samples x Channels x Seqs x Trials
-    r_times_zer = Aggregate arrays of the ZEROED extracted and resampled event timestamps, dims = Samples x Seqs x Trials
-    r_times = 1D array of the extracted non-re-sampled event timestamps for temporal linear session time checking.
-    num_trials = number of trials across entire session.
-
-
-    Example:
-
-    NOTE: the timestamps ARE zeroed, the data is NOT zeroed. The interp function requires the x-axis to be increasing.
-    The timestamps from LSL are output in such large system time numbers it cannot reliably detect the increasing,
-    or some strange rounding is occuring.
-
-    -Ensure non-zeroed time-stamps are stored, reshaped and plotted to ensure there is cross-session temporal consistency.
-    '''
-
-    # Get Trial Data file locations.
-    dat_files = pathway_extract(data_file, '.npz', data_type, full_ext=0)
-    eeg_files = path_subplant(data_file, np.copy(dat_files), 0)
-    if verbose == 1:
-        print('EEG Files DIMS: ', np.shape(eeg_files), 'EEG Files: ', eeg_files)
-    # Experimental Parameters.
-    num_trials = len(eeg_files)
-    # Get Labels file locations.
-    grn_files = pathway_extract(labels_file, '.npz', 'trial', full_ext=0)
-    lab_files = path_subplant(labels_file, np.copy(grn_files), 0)
-    if verbose == 1:
-        print('Lab Files DIMS: ', np.shape(lab_files), 'Lab Files: ', lab_files)
-    # Marker Data.
-    markers = np.load(markers_file)
-    # Marker Timestamps.
-    starts = markers['arr_1']
-    ends = markers['arr_3']
-    # Marker Labels e.g. '6', or '0', or '1', a string of the actual emoji location augmented..
-    mark_start = markers['arr_0']
-    mark_end = markers['arr_2']
-    # Markers reshape by trials and seqs.
-    starts = np.reshape(starts, (num_trials, num_seq, num_emoji))
-    ends = np.reshape(ends, (num_trials, num_seq, num_emoji))
-    # Aggregate arrays.
-    # Samples x Channels x Seq x Trials
-    r_data = np.zeros((out_size, num_chan, num_emoji, num_seq, num_trials))
-    # Samples x Sequences x Trials : Non-Zeroed.
-    r_times = []
-    # Aggregate arrays for zeroed timestamps plotting.
-    r_times_zer = np.zeros((out_size, num_emoji, num_seq, num_trials))
-
-    for t in range(num_trials):
-        # Loading Data.
-        data = np.load(eeg_files[t])
-        # Loading Labels.
-        labels = np.load(lab_files[t])  # .npz containg both labels related files (see below).
-        # Matrix containing the order of augmentations for all emoji locations across the trial.
-        order = labels['arr_0']
-        # Extract Targ Cued for each seqence.
-        targs = labels['arr_1']  # List of target cues across the entire trial.
-        targ_cue = targs[t]  # List of the nth target cue for the nth trial.
-        if verbose == 1:
-            print('EEG File_Name', eeg_files[t])
-            print('Labels: ', labels)
-            print('LABS File_Name', lab_files[t])
-            print('Order', order)
-            print('Targs', targs)
-            print('Targ Cue', targ_cue)
-            print('Marker Start Labels', mark_start)
-            print('Marker End Labels', mark_end)
-
-        for i in range(num_seq):
-            pres_ord = order[i, :]  # List of the nth Sequence's augmentation order from 1 trial.
-            # temporal position of target cue augmented during the trial.
-            f_index = pres_ord[targ_cue]
-            if verbose == 1:
-                print('Pres Ord: ', pres_ord)
-                print('F Index: ', f_index)
-            # EEG Data.
-            sequence = 'arr_{0}'.format(i)  # list key for extraction of 1 sequence worth of data.
-            # Sequence-Level data parsing only relevent electrodes
-            seq_data = data[sequence][:, 0:num_chan]
-
-            '--------DETRENDING--------'
-            if detrend == 1:
-                chan_ind = ['Fz', 'Cz', 'Pz', 'P4', 'P3', 'O1', 'O2', 'A2']
-                seq_data = pol_det(np.copy(seq_data), chan_ind, order=10, plot=False)
-
-            # Sequence-level timestamps from main data array.
-            seq_time = data[sequence][:, -1]
-            if verbose == 1:
-                print('Seq Data DIMS: ', seq_data.shape)
-                print('Seq Time DIMS: ', seq_time.shape)
-            for j in range(num_emoji):
-                # START: Find nearest value of the marker timestamps in the corresponding data timestamp array.
-                v_s = starts[t, i, j]
-                # Index in timestamp array closest to onset of marker indcating the start of the emoji event.
-                str_idx = (np.abs(seq_time - v_s)).argmin()
-                # END: Find nearest value of the marker timestamps in the corresponding data timestamp array.
-                # Pad to ensure all P3 wave form extracted, taking marker start point and adding 0.5s, indexing to that location in the data array.
-                # Just a check to ensure the end marker is not below 0.3s (past peak of the P3 waveform).
-                if ends[t, i, j] < starts[t, i, j] + 0.3:
-                    v_e = starts[t, i, j] + 0.5
-                else:
-                    print('Crash Code: End Marker Positioned Before P3 Propogation.')
-                    v_e = starts[t, i, j] + 0.5
-                # Index in timestamp array closest to onset of marker indcating the end of the emoji event.
-                end_idx = (np.abs(seq_time - v_e)).argmin()
-                if verbose == 1:
-                    print('V_s: ', v_s, 'V_E: ', v_e)
-                    print('str_idx : ', str_idx, 'end_idx: ', end_idx)
-                # Indexing into data array to extract currect P300 chunk.
-                seq_chk = seq_data[str_idx: end_idx, :]
-                # Indexing into timestamp array to extract currect P300 chunk timestamps.
-                if verbose == 1:
-                    print('Str Idx: ', str_idx, 'End Idx: ', end_idx)
-                seq_temp = seq_time[str_idx: end_idx]  # Non-Zeroed Timestamps @ Sequence Level.
-                r_times = np.append(r_times, seq_temp)  # Non-Zeroed Timestamps @ Trial Level.
-                # Zeroed Timestamps @ Sequence Level.
-                seq_temp_zer = seq_temp - seq_temp[0]
-                # Resampling Interpolation Method @ Channel Level, using zeroed timestamp values.
-                r_data[:, :, j, i, t], r_times_zer[:, j, i, t] = interp2D(
-                    seq_chk, seq_temp_zer, output_size=out_size, plotter=0, verbose=0)
-                'Verbose Details of operation.'
-                if verbose == 1:
-                    print('V_s: ', v_s, 'Start IDX: ', str_idx, 'V_e: ', v_e, 'End IDX: ', end_idx)
-                    print('Diff in time between Start and End: ', v_e - v_s)
-                    print('Emoji: {0} | Seq: {1}'.format(j + 1, i + 1),
-                          'Seq_Chk Dims: ', seq_chk.shape)
-                    print('r_data DIMS: ', r_data.shape, 'r_times DIMS: ', r_times.shape)
-                    'Zeroed Data Section for Plotting.'
-    if plotter == 1:
-        plt.plot(r_times_zer[:, 0, 0, 0], r_data[:, 0, 0, 0, 0])
-        plt.title(
-            'Resampled Timestamps (X Axis) and Data (Y Axis) for 1st Channel in 1st Sequence in 1st Trial')
-        plt.show()
-        plt.plot(r_times)
-        plt.title(
-            'Non-Resampled Timestamps to check ascending and consistent session progression in temporal terms.')
-        plt.show()
-    return starts, ends, seq_chk, r_data, r_times_zer, r_times, num_trials
-
-
-def time_check(data_file, markers_file):
-    '''
-    Compares timestapms collected by the eeg / imp and marker streams to ensure maxinmal alignment.
-    Plots the onset and offset of pushed marker stream samples against the timestamp eeg / imp stream values.
-    Also, plots data using data stream timstamp axis vs pre-gen perfect axis to illustrate temporal acquisition inconsistency.
-
-    # Inputs;
-
-    data_file = specific data .npz file for a single trial, assumes 14 channels, 7 actual electrodes.
-
-    makers_file = marker_data.npz containing the pushed marker labels for the entire session period.
-
-    # NO OUTPUTS.
-
-    # Example:
-
-    data_file = '..//Data_Aquisition/Data/voltages_t0001_s1_190917_102243806411.npz'
-    markers_file = '..//Data_Aquisition/Data/marker_data.npz'
-
-    time_check(data_file, markers_file)
-
-    '''
-
-    data = np.load(data_file)
-    markers = np.load(markers_file)
-    # EEG Data.
-    sequence = 'arr_0'
-    seq1_data = data[sequence][:, 0:7]
-    print('Seq Data DIMS: ', seq1_data.shape)
-    # EEG Timestamps.
-    seq1_time = data[sequence][:, -1]
-    print('Seq Time DIMS: ', seq1_time.shape)
-    print('First Data Time Stamp: ', seq1_time[0], ': ', 0)
-    print('Last Data Time Stamp: ', seq1_time[-1], ': ', seq1_time[-1] - seq1_time[0])
-    # Marker Data.
-    seq_mark_end = markers['arr_3']
-    seq_mark_str = markers['arr_1']
-    print('Seq1 Mark DIMS: ', seq_mark_str.shape)
-    print('1st Mark Stamp: ', seq_mark_str[0])
-    # Diff between 1st EEG Timestamp and 1st Marker Timestamp.
-    print('Data Marker Offset: ', seq_mark_str[0] - seq1_time[0])
-
-    for i in range(len(seq_mark_str)):
-        print('Length Mark Collection Emoji {0}: '.format(
-            i + 1), seq_mark_end[i] - seq_mark_str[i], 'Start: ', seq_mark_str[i], 'End: ', seq_mark_end[i])
-
-    'Plots'
-    # Plot EEG Data Timestamps.
-    plt.plot(seq1_time)
-    num_emojis = 7
-    print('1st Sequence Start Times: ', seq_mark_str[0:6])
-    mark1 = np.zeros(len(seq1_time))
-    mark2 = np.zeros(len(seq1_time))
-
-    for i in range(num_emojis):
-        # Plot Marker Start Times.
-        mark1[:] = seq_mark_str[i]
-        print('Start Time: ', seq_mark_str[i])
-        plt.plot(mark1)
-        # Plot Marker End Times.
-        mark2[:] = seq_mark_end[i]
-        print('End Time: ', seq_mark_end[i])
-        plt.plot(mark2)
-    plt.title('Marker Start and End Points Overlaid on EEG OR IMP Data Timestamps.')
-    plt.show()
-
-    # Data with Data Timestamp Axis.
-    plt.plot(seq1_time, seq1_data[:, 0])
-    plt.title('Data with Data Timestamp Axis')
-    plt.show()
-    # Data with Pre-Gen Timestamp Axis.
-    gen_time = np.arange(len(seq1_data[:, 0]))
-    plt.plot(gen_time, seq1_data[:, 0])
-    plt.title('Data with Pre-Gen Timestamp Axis')
-    plt.show()
-
-    # Find nearest value of the marker start timestamps in the corresponding data timestamp array.
-    arr = seq1_time
-    v = seq_mark_str[0]
-    idx = (np.abs(arr - v)).argmin()
-    print('Start Idx: ', idx, 'Idx of Seq Time: ',
-          seq1_time[idx], 'Idx of Seq Data: ', seq1_data[idx, 0])
-    # Find nearest value of the marker end timestamps in the corresponding data timestamp array.
-    arr = seq1_time
-    v = seq_mark_end[6]
-    idx = (np.abs(arr - v)).argmin()
-    print('End Idx: ', idx, 'Idx of Seq Time: ',
-          seq1_time[idx], 'Idx of Seq Data: ', seq1_data[idx, 0])
-
+'--Labelling--'
 
 def binary_labeller(labels, verbose):
     '''
@@ -1668,49 +1129,18 @@ def temporal_labeller(labels_file, num_emoji, num_seq, verbose):
     return tp_labels
 
 
-def interp2D(data, timestamps, output_size, plotter, verbose):
-    # Resamples 2D data matrices of Samples x Channels via interpolation to produce uniform output matrices of output size x channels.
+def int_labels(y):
+    # Generate and output integer labels.
+    y2 = []
+    for p in range(len(y)):
+        if p == 0:
+            y2 = int(y[p])
+        else:
+            y2 = np.append(y2, int(y[p]))
+    return y2
 
-    # Calcualte number of chans.
-    a, b = np.shape(data)
-    num_chans = np.minimum(a, b)
-    # Gen place-holder for resampled data.
-    r_data = np.zeros((output_size, num_chans))
-    r_time = np.linspace(0, output_size * 0.002, output_size)
 
-    for k in range(num_chans):
-        # Interpolate Data and Sub-Plot.
-        yinterp = np.interp(r_time, timestamps, data[:, k])
-        # Aggregate Resampled Channel Data and Timestamps.
-        r_data[:, k] = yinterp
-
-        # Plots
-        if plotter == 1:
-            # Sub-Plot Non-Resampled Channel Chk
-            plt.subplot(2, 1, 1)
-            plt.plot(timestamps, data[:, k])
-            plt.title('Orignal Signal With Inconsistent Timestamps.')
-            # Sub-Plot Resampled Channel Chk
-            plt.subplot(2, 1, 2)
-            plt.plot(r_time, yinterp)
-            plt.title('Signal Post-Interpolation Method Resampling.')
-            plt.show()
-        if verbose == 1:
-            print('OG DIMS: ', data[:, k].shape,
-                  'Resampled Dims: ', yinterp.shape)
-            og_max = np.amax(np.diff(timestamps))
-            og_min = np.amin(np.diff(timestamps))
-            neo_max = np.amax(np.diff(r_time))
-            neo_min = np.amin(np.diff(r_time))
-            print('OG Min: ',  og_min,
-                  'Resampled Min: ', neo_min)
-            print('OG Max: ', og_max,
-                  'Resampled Max: ', neo_max)
-            print('OG  Range: ', (og_max - og_min),
-                  'Resampled Range: ', (neo_max - neo_min))
-
-    return r_data, r_time
-
+'--Basic--'
 
 def is_odd(num):
     return num % 2
@@ -1720,164 +1150,72 @@ def ranger(x, axis=0):
     return np.max(x, axis=axis) - np.min(x, axis=axis)
 
 
-def sess_plot(data, label, ses_tag, num_trl_per_sess):
-    # Plot all P3s and NP3s per session.
-    # Assumes Sampes, Channels, Trials.
-    time = np.arange(0, 500, 2)
-    u, p3_ind = np.unique(ses_tag, return_index=True)
-    num_trials = data.shape[0]
-    p3_ind = np.append(p3_ind, [p3_ind[-1] + num_trl_per_sess])
-    np3_ind = p3_ind + np.int(num_trials / 2)
-    print('UNQ: ', u.shape, u)
-    print('P3 Index: ', p3_ind.shape, p3_ind)
-    print('NP3 Index: ', np3_ind.shape, np3_ind)
-    for i in range(len(u)):
-        plt_p3 = np.average(np.squeeze(data[p3_ind[i]:p3_ind[i + 1], :, :]), axis=0)
-        plt_np3 = np.average(np.squeeze(data[np3_ind[i]:np3_ind[i + 1], :, :]), axis=0)
-        print('Session {0} | P3 mV Range: {1} / NP3 mV Range: {2}'.format(i +
-                                                                          1, ranger(plt_p3), ranger(plt_np3)))
-        # Plot Legends.
-        p3_p, = plt.plot(time, plt_p3, label='P3')
-        np3_p, = plt.plot(time, plt_np3, label='NP3')
-        plt.title('Session: {} Signal Averages '.format(i + 1))
-        plt.legend([p3_p, np3_p], ['P3', 'NP3'])
-        plt.show()
-    return u, p3_ind, np3_ind
-
-
 def rand_data(data, num_trls, num_samps, num_chans):
     # Generate purely randomised data.
     data_ = np.random.rand(num_trls, num_samps, num_chans)
     return data_
 
 
-def uni_100(data, label, num_trls, num_samps, num_chans, n_con, zer_m, plotter):
-    data_ = np.zeros((num_trls, num_samps, num_chans))
-    print('Num Samps: ', num_samps, 'Noise: ', n_con, 'Data DIMS: ', data.shape)
-    # Generate purely uniform data.
-    for i in range(num_trls):
-        if label[i] == 0:
-            # Create sine wave + add noise.
-            window = signal.cosine(num_samps)
-            noise = np.random.uniform(0, n_con, num_samps)
-            if n_con > 0:
-                waveform = window+noise
-                waveform = np.expand_dims(waveform, axis=-1)
-            elif n_con == 0:
-                waveform = window
-                waveform = np.expand_dims(waveform, axis=-1)
-            data_[i, :, :] = waveform
-            if plotter == 1:
-                # Plot differences between original signal ('window'), generated noise and the combined waveform.
-                win_p, = plt.plot(window, label='Window')
-                noise_p, = plt.plot(noise, label='Noise')
-                wave_p, = plt.plot(waveform, label='Waveform')
-                plt.legend([win_p, noise_p, wave_p], ['Window', 'Noise', 'Waveform'])
-                plt.title('Comparing Raw Signal, Noise and Waveform - A Curve')
-                plt.show()
-        elif label[i] == 1:
-            # Create flat signal at zero + add noise.
-            window = np.ones(num_samps)
-            noise = np.random.uniform(0, n_con, num_samps)
-            if n_con > 0:
-                waveform = window+noise
-                waveform = np.expand_dims(waveform, axis=-1)
-            elif n_con == 0:
-                waveform = window
-                waveform = np.expand_dims(waveform, axis=-1)
-            data_[i, :, :] = waveform
-            if plotter == 2:
-                # Plot differences between original signal ('window'), generated noise and the combined waveform.
-                win_p, = plt.plot(window, label='Window')
-                noise_p, = plt.plot(noise, label='Noise')
-                wave_p, = plt.plot(waveform, label='Waveform')
-                plt.legend([win_p, noise_p, wave_p], ['Window', 'Noise', 'Waveform'])
-                plt.title('Comparing Raw Signal, Noise and Waveform - B Flat')
-                plt.show()
-    if zer_m == 1:
-        data_ = zero_mean(np.squeeze(data_))
-        data_ = np.expand_dims(data_, axis=2)
-    if plotter == 1:
-        # eeg_series = temp_axis(data, 500)
-        raw, = plt.plot(data[400, :, :], label='Raw')
-        noised, = plt.plot(data_[400, :, :], label='Noised')
-        plt.legend([raw, noised], ['Raw', 'Noised'])
-        plt.title('Comparing Raw Signal and Noised Waveform')
-        plt.show()
-    return data_
+def stat_check(data, chan_ind, verbose):
+    '''
+    Prints Basic Stats.
+
+    Assumes Samples x Channels.
+
+    '''
+
+    for w in range(len(chan_ind)):
+        imean = np.mean(data[:, w])
+        imin = np.amin(data[:, w])
+        imax = np.amax(data[:, w])
+        irange = imax - imin
+        # Info
+        print('---Channel-Wise Stats: ', chan_ind[w])
+        print(chan_ind[w], ' Mean: ', imean)
+        print(chan_ind[w], ' Min: ', imin)
+        print(chan_ind[w], ' Max: ', imax)
+        print(chan_ind[w], ' Range: ', irange)
 
 
-def net_sets_parser(data, label, train_per, val_per, test_per):
+'--Filtering--'
 
-    # Add new singleton dimesion.
-    # Input Dims: Trials, Samples, Channels.
-    # Expects: Trials, Singleton, Channels, Samples.
-    data = np.swapaxes(np.copy(data), 1, 2)
-    data = np.expand_dims(np.copy(data), axis=1)
-    print('HERE DATA DIMS: ', data.shape)
+def filtering(eeg, samp_ratekHz, zero, hlevel, llevel, notc, notfq):
+    '''
+    Applies filtering to EEG time-series data.
 
-    total = np.shape(data)[0]
-    tr_dv = np.int(total*train_per)
-    vl_dv = np.int(tr_dv + (total*val_per))
-    te_dv = np.int(vl_dv + (total*test_per))
+    Assumes Samples x Channels.
 
-    'Train'
-    X_train = data[0:tr_dv, :, :, :]
-    X_train = X_train.astype('float32')
-    print('X_train Dims: ', np.shape(X_train))
-    y_train = label[0:tr_dv]
-    y_train = y_train.astype('float32')
-    print('y_train Dims: ', np.shape(y_train))
+    Inputs:
 
-    'Val'
-    X_val = data[tr_dv:vl_dv, :, :, :]
-    X_val = X_val.astype('float32')
-    print('X_val Dims: ', np.shape(X_val))
-    y_val = label[tr_dv:vl_dv]
-    y_val = y_val.astype('float32')
-    print('y_val Dims: ', np.shape(y_val))
-
-    'Test'
-    X_test = data[vl_dv:te_dv, :, :, :]
-    X_test = X_test.astype('float32')
-    print('X_test Dims: ', np.shape(X_test))
-    y_test = label[vl_dv:te_dv]
-    y_test = y_test.astype('float32')
-    print('y_test Dims: ', np.shape(y_test))
-
-    return X_train, y_train, X_val, y_val, X_test, y_test
+    eeg             = data matrix.
+    samp_ratekHz    = data acquisition sampling rate in kHz e.g. 0.5 == 500Hz.
+    zero            = if 'ON' data will be zeroed by subtracting the mean of the channel array.
+    hlevel          = high-pass filter limit, if set at None no high-pass filtering is applied.
+    llevel          = low-pass filter limit, if set at None no low-pass filtering is applied.
+    notc            = notc filter options for removing 50Hz noise, either 'NIK', 'NOC' or 'LOW'
+                      see each respective function for more details.
+    notfq           = frequency at which to apply notch filter, UK powerline is 50Hz.
 
 
-def prepro(eeg, samp_ratekHz, zero, ext, elec, filtH, hlevel, filtL, llevel, notc, notfq, ref_ind, ref, avg):
-    # Assumes Samples x Trials.
+    Outputs:
+
+    data            = filtered data.
+
+    Example: data = pb.filtering(data, samp_ratekHz=0.5, zero='ON', hlevel=0.1, llevel=30, notc='NIK', notfq=50)
+
+    '''
+    #
+    '---------------------------------------------------'
     'ZERO: mornalize data with zero meaning.'
     if zero == 'ON':
         eeg = zero_mean(np.copy(eeg))
     '---------------------------------------------------'
-    'EXTRACT: relevant electrodes:  0) Fz, 1) Cz, 2) Pz, 3) P4, 4) P3, 5) O1, 6) O2, 7) A2.'
-    'Reference: Guger (2012): Dry vs Wet Electrodes | https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3345570/'
-    # Ensure reference electrode A2 is extracted by calculating the position in the array.
-    # A2 ref_ind always -7, as there are 6 variables at end: ACC8, ACC9, ACC10, Packet, Trigger & Time-Stamps.
-    if ext == 'INC-Ref':
-        all_eeg = eeg[:, [0, 1, 2, 3, 4, 5, 6]]
-        grab = np.append(elec, ref_ind)
-        eeg = np.squeeze(eeg[:, [grab]])
-    if ext == 'NO-Ref':
-        all_eeg = eeg[:, [0, 1, 2, 3, 4, 5, 6]]
-        eeg = np.squeeze(eeg[:, [elec]])
-    '------------------------------------------------------'
-    'REFERENCING: using REF electrode.'
-    if ref == 'A2':
-        eeg = referencer(np.copy(eeg), -1)
-    elif ref == 'AVG':
-        eeg = avg_referencer(np.copy(eeg), all_eeg)
-    '---------------------------------------------------'
     'FILTERING: highpass filter.'
-    if filtH == 'ON':
+    if hlevel is not None:
         eeg = butter_highpass_filter(np.copy(eeg), hlevel, 500, order=5)
     '---------------------------------------------------'
     'FILTERING: lowpass filter.'
-    if filtL == 'ON':
+    if llevel is not None:
         # Fix by adding singleton dimension.
         if len(np.shape(eeg)) == 1:
             eeg = np.expand_dims(np.copy(eeg), axis=1)
@@ -1886,17 +1224,11 @@ def prepro(eeg, samp_ratekHz, zero, ext, elec, filtH, hlevel, filtL, llevel, not
     'FILTERING: 50Hz notch filter.'
     if notc == 'NIK':
         samp_rateHz = samp_ratekHz * 1000
-        eeg = notchyNik(np.copy(eeg), Fs=samp_rateHz, freq=notfq)
+        eeg = notchyNik(eeg, Fs=samp_rateHz, freq=notfq)
     elif notc == 'NOC':
         eeg = notchy(eeg, 500, notfq)
     elif notc == 'LOW':
-        eeg = butter_lowpass_filter(np.copy(eeg), notfq, 500, order=5)
-    '---------------------------------------------------'
-    'AVERAGING: cross-channels.'
-    if avg is True:
-        eeg = np.average(np.copy(eeg), axis=1)
-        eeg = np.expand_dims(eeg, axis=1)
-    '---------------------------------------------------'
+        eeg = butter_lowpass_filter(eeg, notfq, 500, order=5)
     return eeg
 
 
@@ -1929,124 +1261,6 @@ def notchyNik(data, Fs, freq):
         input_data = signal.filtfilt(b, a, np.copy(data[:, i]))
         data[:, i] = input_data
     return data
-
-
-def freqy(data, fs):
-    'FFT of 1st channel in eeg_data.'
-    from scipy import fftpack
-    x = data[:, 0]
-    fft_data = fftpack.fft(x)
-    freqs = fftpack.fftfreq(len(x)) * fs
-    return fft_data, freqs
-
-
-def sess_tagger(sub_path, i):
-    sess_ = sub_path[i]
-    sess_ = np.copy(sess_[-3])
-    sess_tag = sess_.astype(int)
-    return sess_tag
-
-
-def sub_tagger(sub_path, i):
-    sub_ = sub_path[i]
-    sub_ = np.copy(sub_[25:30])
-    # sub_tag = sub_.astype(np.int)
-    sub_tag = sub_
-    return sub_tag
-
-
-def sub_tag_2(sub_path, i):
-    # Provides subject tagging.
-    sub_tag = sub_tagger(sub_path, i)
-    sub = np.array2string(sub_tag)
-    # Isolate numerical elements.
-    sub = sub[1:6]
-    # Preform of subject indicator result.
-    res = []
-    for i in range(len(sub)):
-        # If the LEADING element is '0' we want to skip that.
-        if sub[i] == '0':
-            # If result is empty, keep it empty.
-            if res == []:
-                res = []
-        else:
-            # Values < 10.
-            # Once element changes from '0' we grab that as the sub number.
-            if i == len(sub)-1:
-                if res == []:
-                    # If the leading values is NOT '0' AND our res preform has NOT been filled, then append.
-                    res = sub[i]
-                    res = np.copy(res)
-                    print(res, type(res))
-            # Vales => 10.
-            # Once element changes from '0' we grab that and the rest of the values.
-            if i == len(sub)-2:
-                if res == []:
-                    res = sub[i:]
-                    res = np.copy(res)
-                    print(res, type(res))
-            # Vales => 100.
-            # Once element changes from '0' we grab that and the rest of the values.
-            if i == len(sub)-3:
-                if res == []:
-                    res = sub[i:]
-                    res = np.copy(res)
-                    print(res, type(res))
-            # Vales => 1000.
-            # Once element changes from '0' we grab that and the rest of the values.
-            if i == len(sub)-4:
-                if res == []:
-                    res = sub[i:]
-                    res = np.copy(res)
-                    print(res, type(res))
-    return res
-
-
-def expSubSessParser(data, label, all, exp, sub, seord, num_trls, exp_q, sub_q, seord_q):
-
-    data_ = []
-    label_ = []
-
-    if all == 1:
-        exp_q = np.unique(exp)
-        sub_q = np.unique(sub)
-        seord_q = np.unique(seord)
-        data_ = data
-        label_ = label
-        exp_ = exp
-        seord_ = seord
-        sub_ = sub
-    elif all == 0:
-        for p in range(num_trls):
-            if exp[p] in exp_q and seord[p] in seord_q and sub[p] in sub_q:
-                if p == 0:
-                    data_ = data[p, :, :]
-                    data_ = np.expand_dims(data_, axis=0)
-                    label_ = label[p]
-                    exp_ = exp[p]
-                    seord_ = seord[p]
-                    sub_ = sub[p]
-                elif p != 0:
-                    if data_ == []:
-                        data_ = data[p, :, :]
-                        data_ = np.expand_dims(data_, axis=0)
-                        label_ = label[p]
-                        exp_ = exp[p]
-                        seord_ = seord[p]
-                        sub_ = sub[p]
-                    else:
-                        data_ = np.append(data_, np.expand_dims(data[p, :, :], axis=0), axis=0)
-                        label_ = np.append(label_, label[p])
-                        exp_ = np.append(exp_, exp[p])
-                        seord_ = np.append(seord_, seord[p])
-                        sub_ = np.append(sub_, sub[p])
-    return data_, label_, exp_, seord_, sub_
-
-
-def basics(time, signal):
-    maxi = np.max(signal)
-    mini = np.min(signal)
-    return[maxi, mini]
 
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -2176,6 +1390,8 @@ def low_pass_grnd(data, Fs):
     return y
 
 
+'--Referencing--'
+
 def referencer(data, grndIdx):
     'Substraction referencing method, commonly use A2 for P300 pre-processing.'
     'Data = Raw EEG time-series.'
@@ -2231,43 +1447,63 @@ def avg_referencer(eeg, all_eeg):
     return eeg
 
 
-def subplot_dual(dataA, dataB, type, title):
-    'Subplotting of 2 data arrays.'
-    'Both must use same orientation.'
-    'Type: Referenced data plot = 0, 7 Chan Plot plot = 1, 2 Chan Occ Plot = 2.'
-    'Title: Name OG Data vs Transformed data.'
+def referencing(data, chan_ind, type, limit, verbose):
+    '''
+    Referencing in either A2 subtraction or average referencing with range removal.
 
-    'Example:'
-    # subplot_dual(data, ref_data, 0, 'Raw vs Referenced Data')
+    Inputs:
 
-    f, axarr = plt.subplots(2, 1)
-    if type == 0:
-        labelsA = ('Fp1', 'F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
-    elif type == 1:
-        labelsA = ('F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
-    linesA = axarr[0].plot(dataA)
-    axarr[0].legend(linesA, labelsA)
-    labelsB = ('F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
-    linesB = axarr[1].plot(dataB)
-    axarr[1].legend(linesB, labelsB)
-    f.suptitle(title, fontsize=16)
+    data        = eeg time-series.
+    chan_ind    = string list of channel names included e.g. ['Fz', 'Cz', 'A2']
+    type        = 'A2' or 'AVG'.
+    limit       = 'AVG' referencing makes use of the range_removal function, this acts like a band boolean.
+                  If set at 40, any channel containing values greater than 40 or lower than -40
+                  will be marked and excluded.
+    verboe      = print function info.
+
+    Outputs:
+
+    data      = 'AVG' refereced data
+
+    NOTE: Assumes data in Samples x Channels.
+    NOTE: Assumes A2 channel is in data matrix.
+    NOTE: channel used for referencing in A2 style must be position as last channel (-1) in matrix.
+
+    Example: data = pb.referencing(data, type='AVG', limit=20)
+
+    '''
+
+    # Data Dimensions.
+    samp, n_chans = np.shape(data)
+    # Isolate Reference Channel
+    ref_chan = data[:, -1]
+    # Remove Reference Channel from data matrix.
+    data = data[:, 0:-1]
+
+    if type == 'A2':
+        for i in range(n_chans - 1):
+            data[:, i] = data[:, i] - ref_chan
+        if verbose == 1:
+            # Data Dimesions Check:
+            print('Post A2 REF EEG DIMS: ', data.shape)
+        return data
+
+    if type == 'AVG':
+        # Use range_removal function to remove channels with excessive range_values.
+        data, chan_list = range_remov(data, n_chans=n_chans - 1,
+                                      chan_ind=chan_ind, limit=limit, verbose=1)
+        # Generate average reference from eeg montage.
+        ref_avg = np.average(data, axis=1)
+        # Subtract average reference from each eeg channel.
+        for i in range(n_chans - 1):
+            data[:, i] = data[:, i] - ref_avg
+        if verbose == 1:
+            # Data Dimesions Check:
+            print('Post AVG REF EEG DIMS: ', data.shape)
+        return data
 
 
-def subplotter(dataA, dataB, time_axis, title):
-    'Subplotting of 2 data arrays.'
-    'Both must use same orientation.'
-    'Type: Referenced data plot = 0, 7 Chan Plot plot = 1, 2 Chan Occ Plot = 2.'
-    'Title: Name OG Data vs Transformed data.'
-
-    'Example:'
-    # subplotterl(data, ref_data, 'Raw vs Referenced Data')
-
-    f, axarr = plt.subplots(2, 1)
-    axarr[0].plot(time_axis, dataA)
-    axarr[1].plot(time_axis, dataB)
-    f.suptitle(title, fontsize=16)
-    plt.show()
-
+'--Zeroing--'
 
 def zero_mean(data):
     'Zeros Data, accepts orientation Samples x Channels.'
@@ -2309,6 +1545,8 @@ def zero_std(data):
 
     return zero_std
 
+
+'--Scaling--'
 
 def scale(x, out_range=(0, 30)):
     # Conversion to mV range.
@@ -2356,51 +1594,115 @@ def scaler1D(data, low, high):
     return data
 
 
-def power(stop_sig, non_stop_sig, plot, title):
-    'Example: '
-    # freqs, Pxx_spec = power(avg_data, 0, 'Sing Trial')
-    # print(freqs[17:24])  # For relevant frequenies extraction.
-    # print(Pxx_spec[17:24])  # For relevant psd value extraction.
+'----PLOTTING----'
 
-    from scipy import signal
-    # import matplotlib.mlab as mlab
-    'Stop Sig'
-    freqs, psd = signal.welch(stop_sig)
-    f, Pxx_spec = signal.periodogram(stop_sig, 250, 'flattop', scaling='spectrum')
-    dt = 0.004  # Because 1 / 0.004 = 250
-    Pxx, freqs = plt.psd(stop_sig, 256, 1 / dt, label='Stop Signal PSD')
-    'Non-Stop Sig'
-    freqs, psd = signal.welch(non_stop_sig)
-    f, Pxx_spec = signal.periodogram(non_stop_sig, 250, 'flattop', scaling='spectrum')
-    dt = 0.004  # Because 1 / 0.004 = 250
-    Pxx, freqs = plt.psd(non_stop_sig, 256, 1 / dt, label='Non-Stop Signal PSD')
-    'Plot Formatting'
-    plt.legend()
-    plt.xlim([12, 16])
-    plt.ylim([-40, -5])
-    plt.yticks(np.arange(-45, -5, step=10))
-    plt.title(title)
-    plt.grid(b=None)
+def subplot_dual(dataA, dataB, type, title):
+    'Subplotting of 2 data arrays.'
+    'Both must use same orientation.'
+    'Type: Referenced data plot = 0, 7 Chan Plot plot = 1, 2 Chan Occ Plot = 2.'
+    'Title: Name OG Data vs Transformed data.'
+
+    'Example:'
+    # subplot_dual(data, ref_data, 0, 'Raw vs Referenced Data')
+
+    f, axarr = plt.subplots(2, 1)
+    if type == 0:
+        labelsA = ('Fp1', 'F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
+    elif type == 1:
+        labelsA = ('F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
+    linesA = axarr[0].plot(dataA)
+    axarr[0].legend(linesA, labelsA)
+    labelsB = ('F3', 'Fz', 'C3', 'Cz', 'Pz', 'P4', 'P3', 'C4', 'A2')
+    linesB = axarr[1].plot(dataB)
+    axarr[1].legend(linesB, labelsB)
+    f.suptitle(title, fontsize=16)
+
+
+def subplotter(dataA, dataB, time_axis, title):
+    'Subplotting of 2 data arrays.'
+    'Both must use same orientation.'
+    'Type: Referenced data plot = 0, 7 Chan Plot plot = 1, 2 Chan Occ Plot = 2.'
+    'Title: Name OG Data vs Transformed data.'
+
+    'Example:'
+    # subplotterl(data, ref_data, 'Raw vs Referenced Data')
+
+    f, axarr = plt.subplots(2, 1)
+    axarr[0].plot(time_axis, dataA)
+    axarr[1].plot(time_axis, dataB)
+    f.suptitle(title, fontsize=16)
     plt.show()
-    return f, Pxx_spec
 
 
-def sing_power(sig, plot, title):
-    from scipy import signal
-    # import matplotlib.mlab as mlab
-    freqs, psd = signal.welch(sig)
-    f, Pxx_spec = signal.periodogram(sig, 250, 'flattop', scaling='spectrum')
-    if plot == 1:
-        'Method 2'
-        dt = 0.004  # Because 1 / 0.004 = 250
-        Pxx, freqs = plt.psd(sig, 256, 1 / dt)
-        plt.xlim([12, 16])
-        title2 = title
-        plt.title(title2)
-        # plt.show()
-        # Pxx, freqs = plt.psd(s, 512, 1 / dt)
-    return f, Pxx_spec
+def plot_pro(fig_num, title, data, x_axis, leg, show, verbose):
+    '''
+    Simple quick plotting function for cleaner code in main functions.
 
+    Assumes Samples x Channels / Events / Sequences / Trials.
+
+    Inputs:
+
+    fig_num     = figure number.
+    title       = figure title.
+    data        = time-series data (e.g. mV amplitudes/ impedance ohms).
+    x_axis      = temporal data of EEG times-series.
+    leg         = plot legend (e.g. channel indices ['Fz', 'Cz', 'A2'])
+    show        = call plt.show() to publish figures.
+    verbose     = print function info.
+
+    Example:
+
+    plot_pro(1, 'Raw Zeroed Data', eeg, None, leg=chan_ind, show=None, verbose=1)
+
+    '''
+    # Get data dims.
+    a, b = np.shape(data)
+    # Assign figure number.
+    plt.figure(fig_num)
+    # Assign figure title.
+    plt.title(title)
+    # If no x_axis generate one based on len of samples.
+    if x_axis is None:
+        x_axis = np.arange(a)
+    '---Plot Data'
+    plt.plot(x_axis, data)
+    # If legend specified, assign.
+    if leg is not None:
+        plt.legend(leg, loc='upper right', fontsize='xx-small')
+    plt.tight_layout()
+    # Print data info.
+    if verbose == 1:
+        print('EEG DIMS: ', data.shape)
+    if show == 1:
+        plt.show()
+
+
+def sess_plot(data, label, ses_tag, num_trl_per_sess):
+    # Plot all P3s and NP3s per session.
+    # Assumes Sampes, Channels, Trials.
+    time = np.arange(0, 500, 2)
+    u, p3_ind = np.unique(ses_tag, return_index=True)
+    num_trials = data.shape[0]
+    p3_ind = np.append(p3_ind, [p3_ind[-1] + num_trl_per_sess])
+    np3_ind = p3_ind + np.int(num_trials / 2)
+    print('UNQ: ', u.shape, u)
+    print('P3 Index: ', p3_ind.shape, p3_ind)
+    print('NP3 Index: ', np3_ind.shape, np3_ind)
+    for i in range(len(u)):
+        plt_p3 = np.average(np.squeeze(data[p3_ind[i]:p3_ind[i + 1], :, :]), axis=0)
+        plt_np3 = np.average(np.squeeze(data[np3_ind[i]:np3_ind[i + 1], :, :]), axis=0)
+        print('Session {0} | P3 mV Range: {1} / NP3 mV Range: {2}'.format(i +
+                                                                          1, ranger(plt_p3), ranger(plt_np3)))
+        # Plot Legends.
+        p3_p, = plt.plot(time, plt_p3, label='P3')
+        np3_p, = plt.plot(time, plt_np3, label='NP3')
+        plt.title('Session: {} Signal Averages '.format(i + 1))
+        plt.legend([p3_p, np3_p], ['P3', 'NP3'])
+        plt.show()
+    return u, p3_ind, np3_ind
+
+
+'----DATA UNIFORMITY CHECK----'
 
 def nancheck(data):
     'Check all channels for nan values.'
@@ -2418,6 +1720,108 @@ def nancheck(data):
             print('-------------------------NORM CHAN')
     return nan_data
 
+
+def interp2D(data, timestamps, output_size, plotter, verbose):
+    # Resamples 2D data matrices of Samples x Channels via interpolation to produce uniform output matrices of output size x channels.
+
+    # Calcualte number of chans.
+    a, b = np.shape(data)
+    num_chans = np.minimum(a, b)
+    # Gen place-holder for resampled data.
+    r_data = np.zeros((output_size, num_chans))
+    r_time = np.linspace(0, output_size * 0.002, output_size)
+
+    for k in range(num_chans):
+        # Interpolate Data and Sub-Plot.
+        yinterp = np.interp(r_time, timestamps, data[:, k])
+        # Aggregate Resampled Channel Data and Timestamps.
+        r_data[:, k] = yinterp
+
+        # Plots
+        if plotter == 1:
+            # Sub-Plot Non-Resampled Channel Chk
+            plt.subplot(2, 1, 1)
+            plt.plot(timestamps, data[:, k])
+            plt.title('Orignal Signal With Inconsistent Timestamps.')
+            # Sub-Plot Resampled Channel Chk
+            plt.subplot(2, 1, 2)
+            plt.plot(r_time, yinterp)
+            plt.title('Signal Post-Interpolation Method Resampling.')
+            plt.show()
+        if verbose == 1:
+            print('OG DIMS: ', data[:, k].shape,
+                  'Resampled Dims: ', yinterp.shape)
+            og_max = np.amax(np.diff(timestamps))
+            og_min = np.amin(np.diff(timestamps))
+            neo_max = np.amax(np.diff(r_time))
+            neo_min = np.amin(np.diff(r_time))
+            print('OG Min: ',  og_min,
+                  'Resampled Min: ', neo_min)
+            print('OG Max: ', og_max,
+                  'Resampled Max: ', neo_max)
+            print('OG  Range: ', (og_max - og_min),
+                  'Resampled Range: ', (neo_max - neo_min))
+
+    return r_data, r_time
+
+
+def uni_100(data, label, num_trls, num_samps, num_chans, n_con, zer_m, plotter):
+    data_ = np.zeros((num_trls, num_samps, num_chans))
+    print('Num Samps: ', num_samps, 'Noise: ', n_con, 'Data DIMS: ', data.shape)
+    # Generate purely uniform data.
+    for i in range(num_trls):
+        if label[i] == 0:
+            # Create sine wave + add noise.
+            window = signal.cosine(num_samps)
+            noise = np.random.uniform(0, n_con, num_samps)
+            if n_con > 0:
+                waveform = window+noise
+                waveform = np.expand_dims(waveform, axis=-1)
+            elif n_con == 0:
+                waveform = window
+                waveform = np.expand_dims(waveform, axis=-1)
+            data_[i, :, :] = waveform
+            if plotter == 1:
+                # Plot differences between original signal ('window'), generated noise and the combined waveform.
+                win_p, = plt.plot(window, label='Window')
+                noise_p, = plt.plot(noise, label='Noise')
+                wave_p, = plt.plot(waveform, label='Waveform')
+                plt.legend([win_p, noise_p, wave_p], ['Window', 'Noise', 'Waveform'])
+                plt.title('Comparing Raw Signal, Noise and Waveform - A Curve')
+                plt.show()
+        elif label[i] == 1:
+            # Create flat signal at zero + add noise.
+            window = np.ones(num_samps)
+            noise = np.random.uniform(0, n_con, num_samps)
+            if n_con > 0:
+                waveform = window+noise
+                waveform = np.expand_dims(waveform, axis=-1)
+            elif n_con == 0:
+                waveform = window
+                waveform = np.expand_dims(waveform, axis=-1)
+            data_[i, :, :] = waveform
+            if plotter == 2:
+                # Plot differences between original signal ('window'), generated noise and the combined waveform.
+                win_p, = plt.plot(window, label='Window')
+                noise_p, = plt.plot(noise, label='Noise')
+                wave_p, = plt.plot(waveform, label='Waveform')
+                plt.legend([win_p, noise_p, wave_p], ['Window', 'Noise', 'Waveform'])
+                plt.title('Comparing Raw Signal, Noise and Waveform - B Flat')
+                plt.show()
+    if zer_m == 1:
+        data_ = zero_mean(np.squeeze(data_))
+        data_ = np.expand_dims(data_, axis=2)
+    if plotter == 1:
+        # eeg_series = temp_axis(data, 500)
+        raw, = plt.plot(data[400, :, :], label='Raw')
+        noised, = plt.plot(data_[400, :, :], label='Noised')
+        plt.legend([raw, noised], ['Raw', 'Noised'])
+        plt.title('Comparing Raw Signal and Noised Waveform')
+        plt.show()
+    return data_
+
+
+'----DATA EXTRACTION----'
 
 def sing_data_extract(direc, ext, keyword, arr):
     'direc = get data directory.'
@@ -2500,6 +1904,464 @@ def path_subplant(main_direc, paths, lab):
     return _files
 
 
+'----DATA SEGMENTATION----'
+
+def sess_tagger(sub_path, i):
+    sess_ = sub_path[i]
+    sess_ = np.copy(sess_[-3])
+    sess_tag = sess_.astype(int)
+    return sess_tag
+
+
+def net_sets_parser(data, label, train_per, val_per, test_per):
+    '''
+    Segmentation of data into train, val and test datasets.
+    '''
+    # Add new singleton dimesion.
+    # Input Dims: Trials, Samples, Channels.
+    # Expects: Trials, Singleton, Channels, Samples.
+    data = np.swapaxes(np.copy(data), 1, 2)
+    data = np.expand_dims(np.copy(data), axis=1)
+    print('HERE DATA DIMS: ', data.shape)
+
+    total = np.shape(data)[0]
+    tr_dv = np.int(total*train_per)
+    vl_dv = np.int(tr_dv + (total*val_per))
+    te_dv = np.int(vl_dv + (total*test_per))
+
+    'Train'
+    X_train = data[0:tr_dv, :, :, :]
+    X_train = X_train.astype('float32')
+    print('X_train Dims: ', np.shape(X_train))
+    y_train = label[0:tr_dv]
+    y_train = y_train.astype('float32')
+    print('y_train Dims: ', np.shape(y_train))
+
+    'Val'
+    X_val = data[tr_dv:vl_dv, :, :, :]
+    X_val = X_val.astype('float32')
+    print('X_val Dims: ', np.shape(X_val))
+    y_val = label[tr_dv:vl_dv]
+    y_val = y_val.astype('float32')
+    print('y_val Dims: ', np.shape(y_val))
+
+    'Test'
+    X_test = data[vl_dv:te_dv, :, :, :]
+    X_test = X_test.astype('float32')
+    print('X_test Dims: ', np.shape(X_test))
+    y_test = label[vl_dv:te_dv]
+    y_test = y_test.astype('float32')
+    print('y_test Dims: ', np.shape(y_test))
+
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
+
+def sub_tagger(sub_path, i):
+    sub_ = sub_path[i]
+    sub_ = np.copy(sub_[25:30])
+    # sub_tag = sub_.astype(np.int)
+    sub_tag = sub_
+    return sub_tag
+
+
+def sub_tag_2(sub_path, i):
+    # Provides subject tagging.
+    sub_tag = sub_tagger(sub_path, i)
+    sub = np.array2string(sub_tag)
+    # Isolate numerical elements.
+    sub = sub[1:6]
+    # Preform of subject indicator result.
+    res = []
+    for i in range(len(sub)):
+        # If the LEADING element is '0' we want to skip that.
+        if sub[i] == '0':
+            # If result is empty, keep it empty.
+            if res == []:
+                res = []
+        else:
+            # Values < 10.
+            # Once element changes from '0' we grab that as the sub number.
+            if i == len(sub)-1:
+                if res == []:
+                    # If the leading values is NOT '0' AND our res preform has NOT been filled, then append.
+                    res = sub[i]
+                    res = np.copy(res)
+                    print(res, type(res))
+            # Vales => 10.
+            # Once element changes from '0' we grab that and the rest of the values.
+            if i == len(sub)-2:
+                if res == []:
+                    res = sub[i:]
+                    res = np.copy(res)
+                    print(res, type(res))
+            # Vales => 100.
+            # Once element changes from '0' we grab that and the rest of the values.
+            if i == len(sub)-3:
+                if res == []:
+                    res = sub[i:]
+                    res = np.copy(res)
+                    print(res, type(res))
+            # Vales => 1000.
+            # Once element changes from '0' we grab that and the rest of the values.
+            if i == len(sub)-4:
+                if res == []:
+                    res = sub[i:]
+                    res = np.copy(res)
+                    print(res, type(res))
+    return res
+
+
+def expSubSessParser(data, label, all, exp, sub, seord, num_trls, exp_q, sub_q, seord_q):
+
+    data_ = []
+    label_ = []
+
+    if all == 1:
+        exp_q = np.unique(exp)
+        sub_q = np.unique(sub)
+        seord_q = np.unique(seord)
+        data_ = data
+        label_ = label
+        exp_ = exp
+        seord_ = seord
+        sub_ = sub
+    elif all == 0:
+        for p in range(num_trls):
+            if exp[p] in exp_q and seord[p] in seord_q and sub[p] in sub_q:
+                if p == 0:
+                    data_ = data[p, :, :]
+                    data_ = np.expand_dims(data_, axis=0)
+                    label_ = label[p]
+                    exp_ = exp[p]
+                    seord_ = seord[p]
+                    sub_ = sub[p]
+                elif p != 0:
+                    if data_ == []:
+                        data_ = data[p, :, :]
+                        data_ = np.expand_dims(data_, axis=0)
+                        label_ = label[p]
+                        exp_ = exp[p]
+                        seord_ = seord[p]
+                        sub_ = sub[p]
+                    else:
+                        data_ = np.append(data_, np.expand_dims(data[p, :, :], axis=0), axis=0)
+                        label_ = np.append(label_, label[p])
+                        exp_ = np.append(exp_, exp[p])
+                        seord_ = np.append(seord_, seord[p])
+                        sub_ = np.append(sub_, sub[p])
+    return data_, label_, exp_, seord_, sub_
+
+
+def data_parsing(data, labels, n_splits, train_size, test_size, random_state, multi_chan, verbose):
+    '''
+    Data splitting for test and train data and labels.
+
+    Can be done for single chan (post channel averaging / or isolated Cz signals),
+    or at the multi channel level (however not randomsied).
+
+    Assumes Trials x Samples.
+
+    Inputs:
+        data = eeg input array.
+        labels = ground truth.
+        splits = number of chunks for train / test evaluation, good for checking start vs end of seesion.
+        train_per = e.g. 0.85 would give 85% of the data to the train set.
+        rand_state = if randmisation engaged (is as default) in sss, then changes random seed.
+        multi_chan = 0 : signle chan, 1 : multi-chan splitting.
+        verbose = 1 : print out info.
+
+    Output:
+        X_train, y_train, X_test, y_test
+
+    Example:
+
+    X_train, y_train, X_test, y_test = pb.data_parsing(data, labels, splits, train_per,
+                                                       rand_state, multi_chan)
+    '''
+    from sklearn.model_selection import StratifiedShuffleSplit
+
+    # Generate split object with sss.
+    test_size = 1 - train_size
+    sss = StratifiedShuffleSplit(
+        n_splits=n_splits, train_size=train_size, test_size=test_size, random_state=random_state)
+    sss.get_n_splits(data, labels)
+    print('SSS Split: ', sss)
+
+    data = np.swapaxes(data, 0, 1)
+    print('data dims: ', data.shape, 'labels dims: ', labels.shape)
+
+    '----Multi-Chan Train/ Test Parsing------'
+    if multi_chan == 'OFF':
+        for train_index, test_index in sss.split(data, labels):
+            X_train, X_test = data[train_index], data[test_index]
+            y_train, y_test = labels[train_index], labels[test_index]
+    elif multi_chan == 'ON':
+        ind = np.int(len(labels)*train_per)
+        X_train = data[:, 0:ind]
+        X_test = data[:, ind:]
+        y_train = labels[0: ind]
+        y_test = labels[ind:]
+    if verbose == 1:
+        print('X train: ', X_train.shape, 'X_test: ', X_test.shape,
+              'y train: ', y_train.shape, 'y_test: ', y_test.shape)
+    return X_train, y_train, X_test, y_test
+
+
+def slice_ext(data_file, data_type, labels_file, markers_file, num_chan, num_emoji, num_seq, out_size, detrend, plotter, verbose):
+    '''
+    Method for extracting emoji level / event data chunks based on the on-set / offset
+    of marker stream pushed label timestamps. This means we extract data only during the
+    times at which the stimuli has begun and ended, yielding more rigourous time-corrective
+    data values. These emoji-level chunks are interpolated to ensure consistency in
+    the temporal separation of data time-points.
+
+    ASSUMES 8 Channels: Fz, Cz, Pz, P4, P3, O1, O2, A2. / [0:7] , important for seq_data parsing.
+
+    # Inputs:
+
+    data_file = the file location containing either the eeg / imp .npz's (Trial-Level).
+    data_type = either 'volt' or 'imp' for voltages or impedances data file extraction and slicing.
+    labels_file = the file location containing the labels files e.g. 0001_trial_labels.npz (Trial-Level).
+    marker_file = the file location containing the marker file (all pushed markers and timestamps) (Session-Level).
+    num_chan = number of channels for extraction.
+    num_emoji = number of emojis in the stimulus array.
+    num_seq = number of sequences in each trial.
+    out_size = size of the channel level signal chunk to want returned from the interpolation function.
+    detrend = application of polynomial detrending of order 10 (1 == Yes).
+    plotter = plot showing the extraction and resampling of one emoji event across all channels using zeroed
+              data. The data is not zeroed, only the timestamps, data zeroing is done by prepro function,
+              see note below. 1 == plot, 0 == no plot.
+    verbose = details of the function operating, 1 == print progress, 0 == do not print.
+
+    # Outputs:
+
+    starts = marker timestamps for all pushed emoji labels occuring at the START of the event (pre-augmenttion).
+    ends = marker timestamps for all pushed emoji labels occuring at the END of the event (post-augmentation).
+    seq_chk = Extracted data array using marker start and end pushed timestamps, yet to be re-sampled.
+    r_data = Aggregate arrays of the extracted and resampled event data, dims = Samples x Channels x Seqs x Trials
+    r_times_zer = Aggregate arrays of the ZEROED extracted and resampled event timestamps, dims = Samples x Seqs x Trials
+    r_times = 1D array of the extracted non-re-sampled event timestamps for temporal linear session time checking.
+    num_trials = number of trials across entire session.
+
+
+    Example:
+
+    NOTE: the timestamps ARE zeroed, the data is NOT zeroed. The interp function requires the x-axis to be increasing.
+    The timestamps from LSL are output in such large system time numbers it cannot reliably detect the increasing,
+    or some strange rounding is occuring.
+
+    -Ensure non-zeroed time-stamps are stored, reshaped and plotted to ensure there is cross-session temporal consistency.
+    '''
+
+    # Get Trial Data file locations.
+    dat_files = pathway_extract(data_file, '.npz', data_type, full_ext=0)
+    eeg_files = path_subplant(data_file, np.copy(dat_files), 0)
+    if verbose == 1:
+        print('EEG Files DIMS: ', np.shape(eeg_files), 'EEG Files: ', eeg_files)
+    # Experimental Parameters.
+    num_trials = len(eeg_files)
+    # Get Labels file locations.
+    grn_files = pathway_extract(labels_file, '.npz', 'trial', full_ext=0)
+    lab_files = path_subplant(labels_file, np.copy(grn_files), 0)
+    if verbose == 1:
+        print('Lab Files DIMS: ', np.shape(lab_files), 'Lab Files: ', lab_files)
+    # Marker Data.
+    markers = np.load(markers_file)
+    # Marker Timestamps.
+    starts = markers['arr_1']
+    ends = markers['arr_3']
+    # Marker Labels e.g. '6', or '0', or '1', a string of the actual emoji location augmented..
+    mark_start = markers['arr_0']
+    mark_end = markers['arr_2']
+    # Markers reshape by trials and seqs.
+    starts = np.reshape(starts, (num_trials, num_seq, num_emoji))
+    ends = np.reshape(ends, (num_trials, num_seq, num_emoji))
+    # Aggregate arrays.
+    # Samples x Channels x Seq x Trials
+    r_data = np.zeros((out_size, num_chan, num_emoji, num_seq, num_trials))
+    # Samples x Sequences x Trials : Non-Zeroed.
+    r_times = []
+    # Aggregate arrays for zeroed timestamps plotting.
+    r_times_zer = np.zeros((out_size, num_emoji, num_seq, num_trials))
+
+    for t in range(num_trials):
+        # Loading Data.
+        data = np.load(eeg_files[t])
+        # Loading Labels.
+        labels = np.load(lab_files[t])  # .npz containg both labels related files (see below).
+        # Matrix containing the order of augmentations for all emoji locations across the trial.
+        order = labels['arr_0']
+        # Extract Targ Cued for each seqence.
+        targs = labels['arr_1']  # List of target cues across the entire trial.
+        targ_cue = targs[t]  # List of the nth target cue for the nth trial.
+        if verbose == 1:
+            print('EEG File_Name', eeg_files[t])
+            print('Labels: ', labels)
+            print('LABS File_Name', lab_files[t])
+            print('Order', order)
+            print('Targs', targs)
+            print('Targ Cue', targ_cue)
+            print('Marker Start Labels', mark_start)
+            print('Marker End Labels', mark_end)
+
+        for i in range(num_seq):
+            pres_ord = order[i, :]  # List of the nth Sequence's augmentation order from 1 trial.
+            # temporal position of target cue augmented during the trial.
+            f_index = pres_ord[targ_cue]
+            if verbose == 1:
+                print('Pres Ord: ', pres_ord)
+                print('F Index: ', f_index)
+            # EEG Data.
+            sequence = 'arr_{0}'.format(i)  # list key for extraction of 1 sequence worth of data.
+            # Sequence-Level data parsing only relevent electrodes
+            seq_data = data[sequence][:, 0:num_chan]
+
+            '--------DETRENDING--------'
+            if detrend == 1:
+                chan_ind = ['Fz', 'Cz', 'Pz', 'P4', 'P3', 'O1', 'O2', 'A2']
+                seq_data = pol_det(np.copy(seq_data), chan_ind, order=10, plot=False)
+
+            # Sequence-level timestamps from main data array.
+            seq_time = data[sequence][:, -1]
+            if verbose == 1:
+                print('Seq Data DIMS: ', seq_data.shape)
+                print('Seq Time DIMS: ', seq_time.shape)
+            for j in range(num_emoji):
+                # START: Find nearest value of the marker timestamps in the corresponding data timestamp array.
+                v_s = starts[t, i, j]
+                # Index in timestamp array closest to onset of marker indcating the start of the emoji event.
+                str_idx = (np.abs(seq_time - v_s)).argmin()
+                # END: Find nearest value of the marker timestamps in the corresponding data timestamp array.
+                # Pad to ensure all P3 wave form extracted, taking marker start point and adding 0.5s, indexing to that location in the data array.
+                # Just a check to ensure the end marker is not below 0.3s (past peak of the P3 waveform).
+                if ends[t, i, j] < starts[t, i, j] + 0.3:
+                    v_e = starts[t, i, j] + 0.5
+                else:
+                    print('Crash Code: End Marker Positioned Before P3 Propogation.')
+                    v_e = starts[t, i, j] + 0.5
+                # Index in timestamp array closest to onset of marker indcating the end of the emoji event.
+                end_idx = (np.abs(seq_time - v_e)).argmin()
+                if verbose == 1:
+                    print('V_s: ', v_s, 'V_E: ', v_e)
+                    print('str_idx : ', str_idx, 'end_idx: ', end_idx)
+                # Indexing into data array to extract currect P300 chunk.
+                seq_chk = seq_data[str_idx: end_idx, :]
+                # Indexing into timestamp array to extract currect P300 chunk timestamps.
+                if verbose == 1:
+                    print('Str Idx: ', str_idx, 'End Idx: ', end_idx)
+                seq_temp = seq_time[str_idx: end_idx]  # Non-Zeroed Timestamps @ Sequence Level.
+                r_times = np.append(r_times, seq_temp)  # Non-Zeroed Timestamps @ Trial Level.
+                # Zeroed Timestamps @ Sequence Level.
+                seq_temp_zer = seq_temp - seq_temp[0]
+                # Resampling Interpolation Method @ Channel Level, using zeroed timestamp values.
+                r_data[:, :, j, i, t], r_times_zer[:, j, i, t] = interp2D(
+                    seq_chk, seq_temp_zer, output_size=out_size, plotter=0, verbose=0)
+                'Verbose Details of operation.'
+                if verbose == 1:
+                    print('V_s: ', v_s, 'Start IDX: ', str_idx, 'V_e: ', v_e, 'End IDX: ', end_idx)
+                    print('Diff in time between Start and End: ', v_e - v_s)
+                    print('Emoji: {0} | Seq: {1}'.format(j + 1, i + 1),
+                          'Seq_Chk Dims: ', seq_chk.shape)
+                    print('r_data DIMS: ', r_data.shape, 'r_times DIMS: ', r_times.shape)
+                    'Zeroed Data Section for Plotting.'
+    if plotter == 1:
+        plt.plot(r_times_zer[:, 0, 0, 0], r_data[:, 0, 0, 0, 0])
+        plt.title(
+            'Resampled Timestamps (X Axis) and Data (Y Axis) for 1st Channel in 1st Sequence in 1st Trial')
+        plt.show()
+        plt.plot(r_times)
+        plt.title(
+            'Non-Resampled Timestamps to check ascending and consistent session progression in temporal terms.')
+        plt.show()
+    return starts, ends, seq_chk, r_data, r_times_zer, r_times, num_trials
+
+
+def class_balance(X, y, balance, verbose):
+    '''
+
+    Generates a class balance of P3 and Non-P3 events based on Binary class labels.
+
+    1) grabs all indices of the P3 and NP3 events from the string labels array and stores separately.
+    2) shuffles the NP3 label indices array to ensure sampling across entire session.
+    3) cuts down NP3 label indices array to same size as that of the P3 labels indices array for
+        a clean 50/50 split to maintain class blance in analysis model fits and testing.
+    4) aggregates P3 and non-P3 data according to these indices into separate data arrays.
+    5) brings all P3 and non-P3 data and labels together for Striatified Shuffling or randomized
+        subsampling further down the analysis pipeline.
+
+    NOTE: Assumes Events x Samples.
+
+    Inputs:
+
+    data = aggregated segmented EEG data across session.
+    labels = MUST BE BINARY ground truth string labels indicating eeg event P3 / NP3.
+    balance = refers to a percentage difference in terms of P3 vs NP3 events in final aggregate array.
+                For example, a value of 1 means 1:1 ratio, a value of 2 means a 1:2 / P3:NP3 ratio.
+                This has a hard-limit as there are only so many P3s to NP3, recommend max of 5.
+    verbose = info on process 1 == print.
+
+    Outputs:
+
+    bal_data = aggregated class-balanced data matrix.
+    bal_labels = aggregated class-balanced string labels array.
+    bal_i_labels = aggregated class-balanced numeric labels array.
+
+    Example:
+
+    bal_i_labels, bal_data, bal_labels = pb.class_balance_50_50(X, y)
+
+    '''
+    import random
+    # Preform P3 and NP3 agregate arrays.
+    p3 = []
+    np3 = []
+    # Gather all indices of P3 (1) and NP3 (0) events in the labels array.
+    id_np3 = [i for i, x in enumerate(y) if x == 0]
+    id_p3 = [i for i, x in enumerate(y) if x == 1]
+    # Convert to subscriptable numpy array.
+    id_np3 = np.asarray(id_np3)
+    id_p3 = np.asarray(id_p3)
+    # Convert to numeric tye integer for indexing.
+    id_np3 = id_np3.astype(int)
+    id_p3 = id_p3.astype(int)
+    # Shuffle the Non-P300 event indices list.
+    random.shuffle(id_np3)
+    # Balance Value.
+    bal_val = np.int(len(id_p3) * balance)
+    # Reduce the number of NP3 indices to the amount examples secified vai the balance value.
+    id_np3 = id_np3[0:bal_val]
+    # Print function info.
+    if verbose == 1:
+        print('ID_P3 / NUMBER OF P3 EVENTS: ', len(id_p3))
+        print('ID_NP3 / NUMBER OF NP3 EVENTS PRE SHUFFLE: ', len(id_np3))
+        print(id_p3[0], len(id_p3), id_p3[0:10])
+        print(id_np3[0], len(id_np3), id_np3[0:10])
+        print('ID_NP3 / NUMBER OF NP3 EVENTS POST SHUFFLE: ', len(id_np3))
+    # Aggregate P3 signals together.
+    p3 = X[id_p3, :]
+    # Aggregate NP3 signals together to a ratio relative to the P3 class events.
+    np3 = X[id_np3, :]
+    # Aggregate P3 and NP3 events into single data matrix.
+    bal_data = np.append(p3, np3, axis=0)
+    # Index into P3 / NP3 label locations and append.
+    bal_labels = np.append(y[id_p3], y[id_np3])
+
+    if verbose == 1:
+        print('P3:NP3 ratio: {0} : {1} / {2} : {3}'.format(1, balance, len(id_p3), len(id_np3)))
+        print('Bal Data DIMS: ', bal_data.shape)
+        print('Bal Labels DIMS: ', bal_labels.shape)
+
+    return bal_data, bal_labels
+
+
+'----TEMPORAL INFO FUNCTIONS----'
+
+def basics(time, signal):
+    maxi = np.max(signal)
+    mini = np.min(signal)
+    return[maxi, mini]
+
+
 def time_stamper(data, show_stamps):
     # Isolate final channel from Cognionics array containing time-stamps.
     # ALso subtract 1st value in this array from all subsequent values.
@@ -2529,61 +2391,129 @@ def simp_temp_axis(data, samp_ratekHz):
     return x
 
 
-def temp_axis(data, samp_ratekHz, plt_secs):
-    'Generate an x axis for plotting time-series at diff Hz.'
-    # data is just your eeg array.
-    # samprate needs to be given in KHz e.g. 0.5 = 500Hz.
-    # plot_secs is the number of seconds you want plotting per trial.
-    'Example: '
-    # x = pb.temp_axis(eeg_avg, 0.5)
-    f = data.shape
-    f = np.amax(f)
+def t_check(starts, times, num_trials, num_seq, num_emoji):
+    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
 
-    constant = 1 / samp_ratekHz  # Temporal Constamt
-    x = np.arange(0, (f * constant), constant)  # Temporal Axis
-    # Grab time-series to length of plot_secs.
-    time_idx = [i for i, e in enumerate(x) if e == plt_secs]
-    time_idx = time_idx[0]
-    # Index array to size useing plot_secs.
-    x = x[0:time_idx]
+    starts = np.reshape(starts, (num_trials, num_seq, num_emoji))
+    print(starts - times[0])
 
-    return x, time_idx
+    return starts
 
 
-def random_index(targCue, num_emoji):
-    import random
-    z = np.arange(num_emoji)
-    random.shuffle(z)
-    fin = z[0]
+def mark_stamps(markers_file, num_trials, num_seq, num_emoji):
+    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
 
-    print(fin)
-    if fin == targCue:
-        fin = z[1]
-    return fin
+    starts = np.reshape(np.load(markers_file)['arr_1'], (num_trials, num_seq, num_emoji), order='C')
+    ends = np.reshape(np.load(markers_file)['arr_3'], (num_trials, num_seq, num_emoji), order='C')
+
+    return starts, ends
 
 
-def sess_inc(num_sess, sub_path, lab_path):
-    sub_path2 = []
-    lab_path2 = []
-    for i in range(len(sub_path)):
-        y = sub_path[i]
-        if num_sess == 1:
-            if y[31:36] == '00001':
-                sub_path2 = np.append(sub_path2, sub_path[i])
-                lab_path2 = np.append(lab_path2, lab_path[i])
-        if num_sess == 2:
-            if y[31:36] == '00001' or y[31:36] == '00002':
-                sub_path2 = np.append(sub_path2, sub_path[i])
-                lab_path2 = np.append(lab_path2, lab_path[i])
-        if num_sess == 3:
-            if y[31:36] == '00001' or y[31:36] == '00002' or y[31:36] == '00003':
-                sub_path2 = np.append(sub_path2, sub_path[i])
-                lab_path2 = np.append(lab_path2, lab_path[i])
-    if num_sess == 4:
-        sub_path2 = sub_path
-        lab_path2 = lab_path
-    return sub_path2, lab_path2
+def mark_arrang(markers_file, num_trials, num_seq, num_emoji):
+    # Converts 1-D array of all flash event marker ground truths into numeric and reshapes to Trials x Sequences x Emoji.
 
+    mark = np.load(markers_file)['arr_0']
+    mark = ','.join(mark)
+
+    new = []
+    for i in range(len(mark)):
+        new = np.append(new, np.fromstring(mark[i], dtype=int, sep=','))
+
+    new = np.reshape(new.astype(int), (num_trials, num_seq, num_emoji))
+    return mark
+
+
+def time_check(data_file, markers_file):
+    '''
+    Compares timestapms collected by the eeg / imp and marker streams to ensure maxinmal alignment.
+    Plots the onset and offset of pushed marker stream samples against the timestamp eeg / imp stream values.
+    Also, plots data using data stream timstamp axis vs pre-gen perfect axis to illustrate temporal acquisition inconsistency.
+
+    # Inputs;
+
+    data_file = specific data .npz file for a single trial, assumes 14 channels, 7 actual electrodes.
+
+    makers_file = marker_data.npz containing the pushed marker labels for the entire session period.
+
+    # NO OUTPUTS.
+
+    # Example:
+
+    data_file = '..//Data_Aquisition/Data/voltages_t0001_s1_190917_102243806411.npz'
+    markers_file = '..//Data_Aquisition/Data/marker_data.npz'
+
+    time_check(data_file, markers_file)
+
+    '''
+
+    data = np.load(data_file)
+    markers = np.load(markers_file)
+    # EEG Data.
+    sequence = 'arr_0'
+    seq1_data = data[sequence][:, 0:7]
+    print('Seq Data DIMS: ', seq1_data.shape)
+    # EEG Timestamps.
+    seq1_time = data[sequence][:, -1]
+    print('Seq Time DIMS: ', seq1_time.shape)
+    print('First Data Time Stamp: ', seq1_time[0], ': ', 0)
+    print('Last Data Time Stamp: ', seq1_time[-1], ': ', seq1_time[-1] - seq1_time[0])
+    # Marker Data.
+    seq_mark_end = markers['arr_3']
+    seq_mark_str = markers['arr_1']
+    print('Seq1 Mark DIMS: ', seq_mark_str.shape)
+    print('1st Mark Stamp: ', seq_mark_str[0])
+    # Diff between 1st EEG Timestamp and 1st Marker Timestamp.
+    print('Data Marker Offset: ', seq_mark_str[0] - seq1_time[0])
+
+    for i in range(len(seq_mark_str)):
+        print('Length Mark Collection Emoji {0}: '.format(
+            i + 1), seq_mark_end[i] - seq_mark_str[i], 'Start: ', seq_mark_str[i], 'End: ', seq_mark_end[i])
+
+    'Plots'
+    # Plot EEG Data Timestamps.
+    plt.plot(seq1_time)
+    num_emojis = 7
+    print('1st Sequence Start Times: ', seq_mark_str[0:6])
+    mark1 = np.zeros(len(seq1_time))
+    mark2 = np.zeros(len(seq1_time))
+
+    for i in range(num_emojis):
+        # Plot Marker Start Times.
+        mark1[:] = seq_mark_str[i]
+        print('Start Time: ', seq_mark_str[i])
+        plt.plot(mark1)
+        # Plot Marker End Times.
+        mark2[:] = seq_mark_end[i]
+        print('End Time: ', seq_mark_end[i])
+        plt.plot(mark2)
+    plt.title('Marker Start and End Points Overlaid on EEG OR IMP Data Timestamps.')
+    plt.show()
+
+    # Data with Data Timestamp Axis.
+    plt.plot(seq1_time, seq1_data[:, 0])
+    plt.title('Data with Data Timestamp Axis')
+    plt.show()
+    # Data with Pre-Gen Timestamp Axis.
+    gen_time = np.arange(len(seq1_data[:, 0]))
+    plt.plot(gen_time, seq1_data[:, 0])
+    plt.title('Data with Pre-Gen Timestamp Axis')
+    plt.show()
+
+    # Find nearest value of the marker start timestamps in the corresponding data timestamp array.
+    arr = seq1_time
+    v = seq_mark_str[0]
+    idx = (np.abs(arr - v)).argmin()
+    print('Start Idx: ', idx, 'Idx of Seq Time: ',
+          seq1_time[idx], 'Idx of Seq Data: ', seq1_data[idx, 0])
+    # Find nearest value of the marker end timestamps in the corresponding data timestamp array.
+    arr = seq1_time
+    v = seq_mark_end[6]
+    idx = (np.abs(arr - v)).argmin()
+    print('End Idx: ', idx, 'Idx of Seq Time: ',
+          seq1_time[idx], 'Idx of Seq Data: ', seq1_data[idx, 0])
+
+
+'----EEG SUB BAND POWER FUNCTIONS----'
 
 def band_power_plots(data, sing_plt, plotter):
     'Calculates bandpower values for 5 major EEG sub-bands.'
@@ -2685,72 +2615,56 @@ def sub_band_chunk_plot(data, divs, pow_disp, plotter):
             plt.title('Sub-Band Plots')
 
 
-def autolabel(x_axis, values):
-    x = []
-    for i in range(len(values)):
-        xA = x_axis[i] + (': ') + np.array2string(np.array(values[i])) + ('%')
-        if i == 0:
-            x = xA
-        else:
-            x = np.append(x, xA)
-    return x
+def power(stop_sig, non_stop_sig, plot, title):
+    'Example: '
+    # freqs, Pxx_spec = power(avg_data, 0, 'Sing Trial')
+    # print(freqs[17:24])  # For relevant frequenies extraction.
+    # print(Pxx_spec[17:24])  # For relevant psd value extraction.
+
+    from scipy import signal
+    # import matplotlib.mlab as mlab
+    'Stop Sig'
+    freqs, psd = signal.welch(stop_sig)
+    f, Pxx_spec = signal.periodogram(stop_sig, 250, 'flattop', scaling='spectrum')
+    dt = 0.004  # Because 1 / 0.004 = 250
+    Pxx, freqs = plt.psd(stop_sig, 256, 1 / dt, label='Stop Signal PSD')
+    'Non-Stop Sig'
+    freqs, psd = signal.welch(non_stop_sig)
+    f, Pxx_spec = signal.periodogram(non_stop_sig, 250, 'flattop', scaling='spectrum')
+    dt = 0.004  # Because 1 / 0.004 = 250
+    Pxx, freqs = plt.psd(non_stop_sig, 256, 1 / dt, label='Non-Stop Signal PSD')
+    'Plot Formatting'
+    plt.legend()
+    plt.xlim([12, 16])
+    plt.ylim([-40, -5])
+    plt.yticks(np.arange(-45, -5, step=10))
+    plt.title(title)
+    plt.grid(b=None)
+    plt.show()
+    return f, Pxx_spec
 
 
-def lda_loc_extract(dat_direc, verbose, norm, num_trials):
-    'Extracts data from Localizer experiments for LDA analysis.'
-    'dat_direc = location of data files.'
-    'num_trials = number trials you want to extract from the experimental session, if [] it takes all trials.'
-    '**kwargs = is used to detect if num_trials has been specifed. '
-    'verbose = if 1 it prints dim info on returned variables.'
-    'norm = add normalization if == 1.'
-    # Data Pathway Extraction.
-    lab_direc = dat_direc + 'Labels/'
-    dat_files = pathway_extract(dat_direc, '.npy', 'Volt', full_ext=1)
-    lab_files = pathway_extract(lab_direc, '.npz', 'Labels', full_ext=1)
-    labels = np.load(lab_files[0])['arr_0']
-    target_names = np.array(['P300', 'NP300'])
-    '_________P300 Averaging_________'
-    np3 = []
-    p3 = []
-    # Iterator Variables.
-    iterator = num_trials
-    if num_trials > len(labels):
-        iterator = len(labels)
-    labels = labels[0:iterator]
-    # Extrsaction.
-    for i in range(iterator):
-        'Pre-Process Data Chunk'
-        eeg = np.load(dat_files[i])
-        # For Cz / Target electrodes breakdown.
-        eeg = prepro(eeg, samp_ratekHz=0.5, zero='ON', ext='INC-Ref', elec=[0, 1, 3, 4],
-                     filtH='ON', hlevel=1, filtL='ON', llevel=10,
-                     notc='LOW', notfq=50, ref_ind=-7, ref='A2', avg='ON')
-        # NP300 Trials.
-        if labels[i] == 0:
-            if np3 == []:
-                np3 = eeg
-                np3 = np.expand_dims(np3, axis=2)
-            else:
-                eeg = np.expand_dims(eeg, axis=2)
-                np3 = np.append(np3, eeg, axis=2)
-        # P300 Trials.
-        if labels[i] == 1:
-            if p3 == []:
-                p3 = eeg
-                p3 = np.expand_dims(p3, axis=2)
-            else:
-                eeg = np.expand_dims(eeg, axis=2)
-                p3 = np.append(p3, eeg, axis=2)
-    # Conjoin.
-    p3 = np.squeeze(p3)
-    np3 = np.squeeze(np3)
-    eeg = np.append(p3, np3, axis=1)
-    if norm == 1:
-        eeg = scaler1D(eeg, -1, 1)
-    eeg = np.swapaxes(eeg, 0, 1)
-    # Info
-    if verbose == 1:
-        print('X DIMS: ', eeg.shape, '\n', eeg[50:54, 0:4])
-        print('y DIMS: ', labels.shape, labels[0:4])
-        print('Names DIMS: ', target_names.shape, target_names[0:4])
-    return eeg, labels, target_names
+def sing_power(sig, plot, title):
+    from scipy import signal
+    # import matplotlib.mlab as mlab
+    freqs, psd = signal.welch(sig)
+    f, Pxx_spec = signal.periodogram(sig, 250, 'flattop', scaling='spectrum')
+    if plot == 1:
+        'Method 2'
+        dt = 0.004  # Because 1 / 0.004 = 250
+        Pxx, freqs = plt.psd(sig, 256, 1 / dt)
+        plt.xlim([12, 16])
+        title2 = title
+        plt.title(title2)
+        # plt.show()
+        # Pxx, freqs = plt.psd(s, 512, 1 / dt)
+    return f, Pxx_spec
+
+
+def freqy(data, fs):
+    'FFT of 1st channel in eeg_data.'
+    from scipy import fftpack
+    x = data[:, 0]
+    fft_data = fftpack.fft(x)
+    freqs = fftpack.fftfreq(len(x)) * fs
+    return fft_data, freqs
