@@ -16,5 +16,6 @@
      # 1) Save file currently working on.
      # 2) Open Git tab in top right of screen, should see files in unstaged changes.
      # 3) Type brief commentin 'Commit Message' box.
-     # 4) Select 'Commit to <REPO NAME>'
-     # 5)
+     # 4) Select 'Stage All' in top right to prime changes to repo for commit.
+     # 5) Select 'Commit to <REPO NAME>'
+     # 6) First time round if brand new repo select 'Publish' otherwise select 'Push'.
